@@ -9,12 +9,8 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\..\..\jwt.net\src\NATS.Jwt\NATS.Jwt.csproj" />
-      <ProjectReference Include="..\..\..\nkeys.net\NATS.NKeys\NATS.NKeys.csproj" />
-    </ItemGroup>
-
-    <ItemGroup>
       <PackageReference Include="NATS.Client.Services" Version="2.5.12" />
+      <PackageReference Include="NATS.Jwt" Version="1.0.0-preview.12" />
     </ItemGroup>
 
 </Project>

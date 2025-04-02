@@ -118,6 +118,7 @@ public class AuthServiceTest(ITestOutputHelper output)
         var exception = await Assert.ThrowsAsync<NatsException>(async () => await client2.ConnectAsync());
         Assert.NotNull(exception.InnerException);
         var serverException = exception.InnerException;
+        output.WriteLine($"ERROR: {exception}");
         Assert.IsType<TimeoutException>(serverException);
     }
 

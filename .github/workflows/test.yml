@@ -1,0 +1,61 @@
+name: Test
+
+on:
+  pull_request: {}
+  push:
+    branches:
+      - main
+
+jobs:
+  dotnet:
+    name: dotnet
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install nats-server
+        shell: bash
+        run: |
+          mkdir tools && cd tools
+          branch="main"
+          for i in 1 2 3
+          do
+            curl -sf https://binaries.nats.dev/nats-io/nats-server/v2@$branch | PREFIX=. sh && break || sleep 30
+          done
+
+          case "${{ matrix.os }}" in
+              ubuntu-latest|macos-latest)
+                  sudo mv nats-server /usr/local/bin
+                  ;;
+              windows-latest)
+                  mv nats-server nats-server.exe
+                  cygpath -w "$(pwd)" | tee -a "$GITHUB_PATH"
+                  ;;
+          esac
+
+      - name: Check nats-server
+        run: nats-server -v
+
+      - name: Setup dotnet
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.x
+            9.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore -p:ContinuousIntegrationBuild=true
+
+      - name: Test
+        run: dotnet test --no-build

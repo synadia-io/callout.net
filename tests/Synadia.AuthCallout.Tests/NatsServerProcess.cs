@@ -1,3 +1,8 @@
+// Copyright (c) Synadia Communications, Inc. All rights reserved.
+// Licensed under the Apache License, Version 2.0.
+
+#pragma warning disable
+
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;

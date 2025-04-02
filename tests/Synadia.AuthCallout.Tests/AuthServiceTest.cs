@@ -1,3 +1,6 @@
+// Copyright (c) Synadia Communications, Inc. All rights reserved.
+// Licensed under the Apache License, Version 2.0.
+
 using System.Text;
 using NATS.Client.Core;
 using NATS.Jwt;
@@ -23,7 +26,7 @@ public class AuthServiceTest(ITestOutputHelper output)
         var ospk = oskp.GetPublicKey();
         oc.Operator.SigningKeys = [ospk];
         var operatorJwt = jwt.EncodeOperatorClaims(oc, okp);
-        
+
         var akp = KeyPair.CreatePair(PrefixByte.Account);
         var apk = akp.GetPublicKey();
         var ac = jwt.NewAccountClaims(apk);
@@ -43,20 +46,20 @@ public class AuthServiceTest(ITestOutputHelper output)
         const string confPath = $"server_{nameof(Connect_with_jwt)}.conf";
         File.WriteAllText(confPath, conf);
         await using var server = await NatsServerProcess.StartAsync(config: confPath);
-        
+
         var ukp = KeyPair.CreatePair(PrefixByte.User);
         var upk = ukp.GetPublicKey();
         var uc = jwt.NewUserClaims(upk);
         uc.User.IssuerAccount = apk;
         var userJwt = jwt.EncodeUserClaims(uc, askp);
         var userSeed = ukp.GetSeed();
-        
+
         var authOpts = new NatsAuthOpts { Jwt = userJwt, Seed = userSeed };
         var opts = new NatsOpts { Url = server.Url, AuthOpts = authOpts };
         await using var nats = new NatsConnection(opts);
         await nats.PingAsync();
     }
-    
+
     [Fact]
     public async Task Connect_with_callout()
     {
@@ -73,7 +76,7 @@ public class AuthServiceTest(ITestOutputHelper output)
                         system_account: SYS
                         authorization {
                           auth_callout {
-                            issuer: "{{ apk }}"
+                            issuer: "{{apk}}"
                             auth_users: [ auth, sys ]
                             account: AUTH
                           }
@@ -81,11 +84,11 @@ public class AuthServiceTest(ITestOutputHelper output)
                         """;
         const string confPath = $"server_{nameof(Connect_with_callout)}.conf";
         File.WriteAllText(confPath, conf);
-        await using var server = await NatsServerProcess.StartAsync(logger: s => { output.WriteLine($"LOG: {s}");}, config: confPath);
-        
+        await using var server = await NatsServerProcess.StartAsync(logger: s => { output.WriteLine($"LOG: {s}"); }, config: confPath);
+
         await using var authNats = new NatsConnection(new NatsOpts { Url = server.Url, AuthOpts = new NatsAuthOpts { Username = "auth" } });
         await authNats.PingAsync();
-        
+
         var opts = new NatsAuthServiceOpts(
             authorizer: r =>
             {
@@ -110,21 +113,21 @@ public class AuthServiceTest(ITestOutputHelper output)
 
         await using var client1 = new NatsConnection(new NatsOpts { Url = server.Url, AuthOpts = new NatsAuthOpts { Username = "bob" } });
         await client1.PingAsync();
-        
+
         await using var client2 = new NatsConnection(new NatsOpts { Name = "bad", Url = server.Url, AuthOpts = new NatsAuthOpts { Username = "bob" } });
-        var exception = await Assert.ThrowsAsync<NatsException>(async ()=> await client2.ConnectAsync());
+        var exception = await Assert.ThrowsAsync<NatsException>(async () => await client2.ConnectAsync());
         Assert.NotNull(exception.InnerException);
         var serverException = exception.InnerException;
         Assert.IsType<TimeoutException>(serverException);
     }
-    
+
     [Fact]
     public async Task Connect_with_callout_with_xkey()
     {
         var jwt = new NatsJwt();
 
         var xkp = KeyPair.CreatePair(PrefixByte.Curve);
-        
+
         var akp = KeyPair.CreatePair(PrefixByte.Account);
         var apk = akp.GetPublicKey();
 
@@ -136,17 +139,17 @@ public class AuthServiceTest(ITestOutputHelper output)
                         system_account: SYS
                         authorization {
                           auth_callout {
-                            issuer: "{{ apk }}"
+                            issuer: "{{apk}}"
                             auth_users: [ auth, sys ]
                             account: AUTH
-                            xkey: "{{ xkp.GetPublicKey() }}"
+                            xkey: "{{xkp.GetPublicKey()}}"
                           }
                         }
                         """;
         const string confPath = $"server_{nameof(Connect_with_callout_with_xkey)}.conf";
         File.WriteAllText(confPath, conf);
-        await using var server = await NatsServerProcess.StartAsync(logger: s => { output.WriteLine($"LOG: {s}");}, config: confPath);
-        
+        await using var server = await NatsServerProcess.StartAsync(logger: s => { output.WriteLine($"LOG: {s}"); }, config: confPath);
+
         await using var authNats = new NatsConnection(new NatsOpts { Url = server.Url, AuthOpts = new NatsAuthOpts { Username = "auth" } });
         await authNats.PingAsync();
 
@@ -177,9 +180,9 @@ public class AuthServiceTest(ITestOutputHelper output)
 
         await using var client1 = new NatsConnection(new NatsOpts { Url = server.Url, AuthOpts = new NatsAuthOpts { Username = "bob" } });
         await client1.PingAsync();
-        
+
         await using var client2 = new NatsConnection(new NatsOpts { Name = "bad", Url = server.Url, AuthOpts = new NatsAuthOpts { Username = "bob" } });
-        var exception = await Assert.ThrowsAsync<NatsException>(async ()=> await client2.ConnectAsync());
+        var exception = await Assert.ThrowsAsync<NatsException>(async () => await client2.ConnectAsync());
         Assert.NotNull(exception.InnerException);
         var serverException = exception.InnerException;
         Assert.IsType<TimeoutException>(serverException);

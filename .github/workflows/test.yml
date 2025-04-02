@@ -58,4 +58,4 @@ jobs:
         run: dotnet build --no-restore -p:ContinuousIntegrationBuild=true
 
       - name: Test
-        run: dotnet test --no-build
+        run: dotnet test --no-build --logger:"console;verbosity=normal"

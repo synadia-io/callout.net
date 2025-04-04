@@ -17,7 +17,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <Company>Synadia Communications, Inc.</Company>
     <Authors>Synadia</Authors>
-    <Copyright>© Synadia Communications, Inc. All rights reserved.</Copyright>
+    <Copyright> Synadia Communications, Inc. All rights reserved.</Copyright>
     <PackageProjectUrl>https://github.com/synadia-io/callout.net</PackageProjectUrl>
     <RepositoryUrl>$(PackageProjectUrl)</RepositoryUrl>
     <RepositoryType>git</RepositoryType>

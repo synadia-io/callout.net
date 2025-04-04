@@ -7,7 +7,6 @@ using NATS.Jwt;
 using NATS.Jwt.Models;
 using NATS.Net;
 using NATS.NKeys;
-using Xunit.Abstractions;
 
 namespace Synadia.AuthCallout.Tests;
 
@@ -17,7 +16,6 @@ public class AuthServiceTest(ITestOutputHelper output)
     public async Task Connect_with_jwt()
     {
         var jwt = new NatsJwt();
-
         var okp = KeyPair.CreatePair(PrefixByte.Operator);
         var opk = okp.GetPublicKey();
         var oc = jwt.NewOperatorClaims(opk);

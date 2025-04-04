@@ -159,14 +159,8 @@ stylecop.documentation.xmlHeader = false
 dotnet_diagnostic.SA1101.severity = none     # Prefix local calls with this
 dotnet_diagnostic.SA1309.severity = none     # Field names must not begin with underscore
 
-[**/Models/*.cs]
-dotnet_diagnostic.CS8618.severity = none     # Non-nullable property must contain a non-null value when exiting constructor
-
-
-# C++ Files
-[*.{cpp,h,in}]
-curly_bracket_next_line = true
-indent_brace_style = Allman
+# xunit Analyzers
+dotnet_diagnostic.xUnit1051.severity = none # Calls to methods which accept CancellationToken should use TestContext.Current.CancellationToken to allow test cancellation to be more responsive
 
 # Xml project files
 [*.{csproj,vbproj,vcxproj,vcxproj.filters,proj,nativeproj,locproj}]

@@ -44,6 +44,11 @@ jobs:
       - name: Check nats-server
         run: nats-server -v
 
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.x'
+
       - name: Setup dotnet
         uses: actions/setup-dotnet@v4
         with:

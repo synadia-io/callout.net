@@ -59,3 +59,12 @@ jobs:
 
       - name: Test
         run: dotnet test --no-build --logger:"console;verbosity=normal"
+
+      - name: Compat Test
+        env:
+          X_COMPAT_EXE: bin\Debug\net8.0\compat
+        run: |
+          cd tests/compat
+          dotnet build
+          go test -v
+

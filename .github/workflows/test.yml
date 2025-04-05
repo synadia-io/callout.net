@@ -67,7 +67,7 @@ jobs:
 
       - name: Compat Test
         env:
-          X_COMPAT_EXE: bin\Debug\net8.0\compat
+          X_COMPAT_EXE: bin/Debug/net8.0/compat
         run: |
           cd tests/compat
           dotnet build

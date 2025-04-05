@@ -5,8 +5,6 @@ package compat
 
 import (
     "bytes"
-    "encoding/base64"
-    "encoding/json"
     "errors"
     "github.com/aricart/nst.go"
     "github.com/nats-io/jwt/v2"
@@ -14,9 +12,7 @@ import (
     "github.com/nats-io/nkeys"
     "github.com/stretchr/testify/suite"
     "os"
-    "os/exec"
     "testing"
-    "time"
 )
 
 type CalloutSuite struct {
@@ -24,6 +20,9 @@ type CalloutSuite struct {
     dir *nst.TestDir
     env CalloutEnv
     ns  nst.NatsServer
+    // setup second server to talk to auth service process
+    dir2 *nst.TestDir
+    ns2  nst.NatsServer
 }
 
 type CalloutEnv interface {
@@ -40,79 +39,14 @@ type CalloutEnv interface {
     AccountKey() nkeys.KeyPair
 }
 
-type NATSOptions struct {
-    Servers          []string      `json:"servers"`
-    NoRandomize      bool          `json:"no_randomize"`
-    Name             string        `json:"name"`
-    Verbose          bool          `json:"verbose"`
-    Pedantic         bool          `json:"pedantic"`
-    Secure           bool          `json:"secure"`
-    AllowReconnect   bool          `json:"allow_reconnect"`
-    MaxReconnect     int           `json:"max_reconnect"`
-    ReconnectWait    time.Duration `json:"reconnect_wait"`
-    Timeout          time.Duration `json:"timeout"`
-    PingInterval     time.Duration `json:"ping_interval"`
-    MaxPingsOut      int           `json:"max_pings_out"`
-    ReconnectBufSize int           `json:"reconnect_buf_size"`
-    SubChanLen       int           `json:"sub_chan_len"`
-    User             string        `json:"user"`
-    Password         string        `json:"password"`
-    Token            string        `json:"token"`
-}
-
-type callbackFn string
-
 // Option is a function type used to configure the AuthorizationService options
 type Option func(*Options) error
 
-type Options struct {
-    // Name for the AuthorizationService cannot have spaces, etc, as this is
-    // the name that the actual micro.Service will use.
-    Name string
-    // Authorizer function that processes authorization request and issues user
-    // JWT
-    Authorizer callbackFn
-    // ResponseSigner is a function that performs the signing of the
-    // jwt.AuthorizationResponseClaim
-    ResponseSigner callbackFn
-    // ResponseSigner is the key that will be used to sign the
-    // jwt.AuthorizationResponseClaim
-    ResponseSignerKey nkeys.KeyPair
-    // ResponseSigner is the key that ID of the account issuing the
-    // jwt.AuthorizationResponseClaim if not set, ResponseSigner is the account
-    ResponseSignerIssuer string
-    // EncryptionKey is an optional configuration that must be provided if the
-    // callout is configured to use encryption.
-    EncryptionKey nkeys.KeyPair
-    // InvalidUser when set user JWTs are validated if error notified via the
-    // callback
-    InvalidUser callbackFn
-    // ErrCallback is an optional callback invoked whenever AuthorizerFn
-    // returns an error, useful for handling test errors.
-    ErrCallback callbackFn
-    // ServiceEndpoints sets the number of endpoints available for the service
-    // to handle requests.
-    ServiceEndpoints int
-    // AsyncWorkers specifies the number of workers used for asynchronous task
-    // processing.
-    AsyncWorkers int
-}
-
-type CompatKey struct {
-    Seed string `json:"seed"`
-    Pk   string `json:"pk"`
-}
-
-type CompatVars struct {
-    NatsUrls     []string    `json:"nats_urls"`
-    NatsOpts     NATSOptions `json:"nats_opts"`
-    Audience     string      `json:"audience"`
-    UserInfoSubj string      `json:"user_info_subj"`
-    AccountKey   CompatKey   `json:"account_key"`
-}
-
 func NewCalloutSuite(t *testing.T) *CalloutSuite {
-    return &CalloutSuite{dir: nst.NewTestDir(t, os.TempDir(), "callout_test")}
+    return &CalloutSuite{
+        dir:  nst.NewTestDir(t, os.TempDir(), "callout_test"),
+        dir2: nst.NewTestDir(t, os.TempDir(), "callout2_test"),
+    }
 }
 
 // ResponseSignerKey sets the response signer key to be used for signing
@@ -142,6 +76,7 @@ func (s *CalloutSuite) SetupServer(conf []byte) nst.NatsServer {
 func (s *CalloutSuite) SetupSuite() {
     //println(">>> SETUP SUITE", string(s.env.GetServerConf()))
     s.ns = s.SetupServer(s.env.GetServerConf())
+    s.ns2 = nst.NewNatsServer(s.dir2, nil)
 }
 
 func (s *CalloutSuite) TearDownSuite() {
@@ -167,130 +102,14 @@ func TestBasicEnv(t *testing.T) {
 }
 
 func (s *CalloutSuite) TestSetupOK() {
-    println("test setup starting...")
+    es := StartExternalAuthService(setupOK, s)
 
-    compatExe := os.Getenv("X_COMPAT_EXE")
-    if compatExe == "" {
-        s.T().Fatal("environment variable X_COMPAT_EXE is not set")
-    }
-    println("X_COMPAT_EXE:", compatExe)
-
-    opts := s.env.ServiceUserOpts()
-    opts1 := &nats.Options{}
-
-    for _, opt := range opts {
-        err := opt(opts1)
-        if err != nil {
-            s.T().Fatalf("can't set opts: %v", err)
-        }
-    }
-
-    opts2 := NATSOptions{
-        Secure:           opts1.Secure,
-        AllowReconnect:   opts1.AllowReconnect,
-        MaxReconnect:     opts1.MaxReconnect,
-        ReconnectWait:    opts1.ReconnectWait,
-        Timeout:          opts1.Timeout,
-        PingInterval:     opts1.PingInterval,
-        MaxPingsOut:      opts1.MaxPingsOut,
-        ReconnectBufSize: opts1.ReconnectBufSize,
-        SubChanLen:       opts1.SubChanLen,
-        User:             opts1.User,
-        Password:         opts1.Password,
-        Token:            opts1.Token,
-    }
-
-    seed, err := s.env.AccountKey().Seed()
-    if err != nil {
-        s.T().Fatalf("failed to get account seed: %v", err)
-    }
-
-    pk, err := s.env.AccountKey().PublicKey()
-    if err != nil {
-        s.T().Fatalf("failed to get account pk: %v", err)
-    }
-
-    cv := CompatVars{
-        NatsUrls:     s.ns.NatsURLs(),
-        NatsOpts:     opts2,
-        Audience:     s.env.Audience(),
-        UserInfoSubj: nst.UserInfoSubj,
-        AccountKey: CompatKey{
-            Seed: string(seed),
-            Pk:   pk,
-        },
-    }
-
-    var buf bytes.Buffer
-    if err := json.NewEncoder(&buf).Encode(cv); err != nil {
-        s.T().Fatalf("failed to encode CompatVars to JSON: %v", err)
-    }
-
-    encoded := base64.StdEncoding.EncodeToString(buf.Bytes())
-
-    println("Encoded CompatVars:", encoded)
-
-    cmd := exec.Command(compatExe, "-r", "-") // Replace with your process
-
-    cmd.Stdout = os.Stdout
-    cmd.Stderr = os.Stderr
-
-    cmd.Stdin = bytes.NewReader([]byte(encoded))
-
-    if err := cmd.Start(); err != nil {
-        s.T().Fatalf("failed to start process: %v", err)
-    }
-
-    println("process started, PID:", cmd.Process.Pid)
-
-    time.Sleep(3 * time.Second)
-
-    //serviceConn := s.getServiceConn()
-    //defer serviceConn.Close()
-    //info := nst.ClientInfo(s.T(), serviceConn)
-    //s.Equal(s.env.ServiceAudience(), info.Data.Account)
-
-    //opts := append(s.env.ServiceOpts(), Authorizer(authorizer), Logger(nst.NewNilLogger()))
-    //svc, err := NewAuthorizationService(serviceConn, opts...)
-    //s.NoError(err)
-    //s.NotNil(svc)
-    //defer func() {
-    //    _ = svc.Stop()
-    //}()
-
-    println(">>> connecting as user...")
-    c, err := s.userConn(nats.UserInfo("hxxello", "woxxrld"))
+    c, err := s.userConn(nats.UserInfo("hello", "world"))
     s.NoError(err)
     s.NotNil(c)
     info := nst.ClientInfo(s.T(), c)
     s.Contains(info.Data.Permissions.Pub.Allow, nst.UserInfoSubj)
     s.Contains(info.Data.Permissions.Sub.Allow, "_INBOX.>")
 
-    // Create a channel to signal when the process exits
-    done := make(chan error, 1)
-
-    // Start a goroutine to wait for the process to finish
-    go func() {
-        done <- cmd.Wait()
-    }()
-
-    // Use a select statement to wait for either the process to exit or a timeout
-    select {
-    case err := <-done:
-        if err != nil {
-            s.T().Fatalf("process exited with error: %v", err)
-        } else {
-            println("process exited successfully, code:", cmd.ProcessState.ExitCode())
-        }
-    case <-time.After(5 * time.Second):
-        println("process timed out, killing process...")
-        if killErr := cmd.Process.Kill(); killErr != nil {
-            s.T().Fatalf("failed to kill process: %v", killErr)
-        } else {
-            println("process killed successfully")
-        }
-    }
-
-    println("Size of encoded in KB:", len(encoded)/1024)
-    println("test setup ok", len(encoded))
+    es.Wait()
 }

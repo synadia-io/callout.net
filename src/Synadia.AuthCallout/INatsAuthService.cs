@@ -16,14 +16,16 @@ public interface INatsAuthService : IAsyncDisposable
     /// Starts the NatsAuthService asynchronously by initializing the service and setting up the necessary endpoints
     /// for handling authentication requests.
     /// </summary>
+    /// <param name="cancellationToken">A cancellation token to observe while waiting for the operation to complete.</param>
     /// <returns>A task that represents the asynchronous start operation.</returns>
-    ValueTask StartAsync();
+    ValueTask StartAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Processes an incoming request asynchronously by decoding the JWT, authorizing the request, and optionally encrypting
     /// the response before returning it.
     /// </summary>
     /// <param name="msg">The incoming request message containing the data to process.</param>
+    /// <param name="cancellationToken">A cancellation token to observe while waiting for the operation to complete.</param>
     /// <returns>A task that represents the asynchronous operation, containing the processed response as a byte array.</returns>
-    ValueTask<byte[]> ProcessRequestAsync(NatsSvcMsg<byte[]> msg);
+    ValueTask<byte[]> ProcessRequestAsync(NatsSvcMsg<byte[]> msg, CancellationToken cancellationToken = default);
 }

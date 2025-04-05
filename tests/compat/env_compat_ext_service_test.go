@@ -1,0 +1,317 @@
+package compat
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"github.com/aricart/nst.go"
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nkeys"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+const setupOK = "setup_ok"
+const basicAccountEnv = "basic_account_env"
+const basicEncryptedEnv = "basic_encrypted_env"
+const delegatedEnv = "delegated_env"
+const delegatedKeysEnv = "delegated_keys_env"
+
+const subjectDriverAll = "test.driver.>"
+const subjectServiceStop = "test.service.stop"
+const subjectDriverConnected = "test.driver.connected"
+const subjectDriverError = "test.driver.error"
+const subjectDriverVars = "test.driver.vars"
+
+type ExtService struct {
+	name            string
+	t               *testing.T
+	s               *CalloutSuite
+	cv              *CompatVars
+	cmd             *exec.Cmd
+	nc2             *nats.Conn
+	mu              sync.Mutex
+	lastErrorString string
+}
+
+type callbackFn string
+
+type Options struct {
+	// Name for the AuthorizationService cannot have spaces, etc, as this is
+	// the name that the actual micro.Service will use.
+	Name string
+	// Authorizer function that processes authorization request and issues user
+	// JWT
+	Authorizer callbackFn
+	// ResponseSigner is a function that performs the signing of the
+	// jwt.AuthorizationResponseClaim
+	ResponseSigner callbackFn
+	// ResponseSigner is the key that will be used to sign the
+	// jwt.AuthorizationResponseClaim
+	ResponseSignerKey nkeys.KeyPair
+	// ResponseSigner is the key that ID of the account issuing the
+	// jwt.AuthorizationResponseClaim if not set, ResponseSigner is the account
+	ResponseSignerIssuer string
+	// EncryptionKey is an optional configuration that must be provided if the
+	// callout is configured to use encryption.
+	EncryptionKey nkeys.KeyPair
+	// InvalidUser when set user JWTs are validated if error notified via the
+	// callback
+	InvalidUser callbackFn
+	// ErrCallback is an optional callback invoked whenever AuthorizerFn
+	// returns an error, useful for handling test errors.
+	ErrCallback callbackFn
+	// ServiceEndpoints sets the number of endpoints available for the service
+	// to handle requests.
+	ServiceEndpoints int
+	// AsyncWorkers specifies the number of workers used for asynchronous task
+	// processing.
+	AsyncWorkers int
+}
+
+type CompatKey struct {
+	Seed string `json:"seed"`
+	Pk   string `json:"pk"`
+}
+
+type CompatVars struct {
+	Name         string      `json:"name"`
+	NatsUrls     []string    `json:"nats_urls"`
+	NatsOpts     NATSOptions `json:"nats_opts"`
+	Audience     string      `json:"audience"`
+	UserInfoSubj string      `json:"user_info_subj"`
+	AccountKey   CompatKey   `json:"account_key"`
+	NatsTestUrls []string    `json:"nats_test_urls"`
+}
+
+type NATSOptions struct {
+	Servers          []string      `json:"servers"`
+	NoRandomize      bool          `json:"no_randomize"`
+	Name             string        `json:"name"`
+	Verbose          bool          `json:"verbose"`
+	Pedantic         bool          `json:"pedantic"`
+	Secure           bool          `json:"secure"`
+	AllowReconnect   bool          `json:"allow_reconnect"`
+	MaxReconnect     int           `json:"max_reconnect"`
+	ReconnectWait    time.Duration `json:"reconnect_wait"`
+	Timeout          time.Duration `json:"timeout"`
+	PingInterval     time.Duration `json:"ping_interval"`
+	MaxPingsOut      int           `json:"max_pings_out"`
+	ReconnectBufSize int           `json:"reconnect_buf_size"`
+	SubChanLen       int           `json:"sub_chan_len"`
+	User             string        `json:"user"`
+	Password         string        `json:"password"`
+	Token            string        `json:"token"`
+}
+
+func StartExternalAuthService(name string, s *CalloutSuite) *ExtService {
+	cv := createVars(name, s)
+
+	nc2, err := s.ns2.MaybeConnect()
+	if err != nil {
+		s.T().Fatalf("can't connect to nats2: %v", err)
+	}
+
+	es := &ExtService{
+		name:            name,
+		t:               s.T(),
+		s:               s,
+		cv:              cv,
+		nc2:             nc2,
+		lastErrorString: "",
+	}
+
+	waitConnected := make(chan struct{})
+	timeout := time.NewTimer(5 * time.Second) // Set timeout duration as appropriate
+	defer timeout.Stop()
+
+	subscribe, err := nc2.Subscribe(subjectDriverAll, func(m *nats.Msg) {
+		logMessage(2, "received message: "+string(m.Data))
+
+		if m.Subject == subjectDriverConnected {
+			logMessage(1, "Connected")
+			close(waitConnected) // Signal completion
+			err := m.Respond([]byte("ok"))
+			if err != nil {
+				logMessage(0, fmt.Sprintf("error in test.connected response: %v", err))
+			}
+		}
+
+		if m.Subject == subjectDriverVars {
+			var buf bytes.Buffer
+			if err := json.NewEncoder(&buf).Encode(cv); err != nil {
+				s.T().Fatalf("failed to encode CompatVars to JSON: %v", err)
+			}
+			//encoded := base64.StdEncoding.EncodeToString(buf.Bytes())
+			err := m.Respond(buf.Bytes())
+			if err != nil {
+				logMessage(0, fmt.Sprintf("error in test.vars response: %v", err))
+			}
+		}
+
+		if m.Subject == subjectDriverError {
+			errorMessage := string(m.Data)
+			logMessage(1, fmt.Sprintf("error service: %s", errorMessage))
+
+			es.mu.Lock()
+			defer es.mu.Unlock()
+			es.lastErrorString = errorMessage // Set the string variable in a thread-safe manner
+		}
+
+	})
+	if err != nil {
+		s.T().Fatalf("error in test coordination sub: %v", err)
+	}
+	logMessage(1, "subscribed to tes:t"+subscribe.Subject)
+
+	compatExe := os.Getenv("X_COMPAT_EXE")
+	if compatExe == "" {
+		s.T().Fatal("environment variable X_COMPAT_EXE is not set")
+	}
+	logMessage(3, "X_COMPAT_EXE: "+compatExe)
+
+	natsTestUrl := s.ns2.NatsURLs()[0]
+	logMessage(2, "natsTestUrl: "+natsTestUrl)
+
+	cmd := exec.Command(compatExe, "-r", natsTestUrl) // Replace with your process
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		s.T().Fatalf("failed to start process: %v", err)
+	}
+
+	es.cmd = cmd
+
+	logMessage(1, "process started")
+
+	select {
+	case <-waitConnected:
+		logMessage(1, "service connected successfully.")
+	case <-timeout.C:
+		s.T().Fatalf("process failed to connect: %v", err)
+	}
+
+	return es
+}
+
+func (es *ExtService) Start() {
+	es.t.Fatal("not implemented")
+}
+
+func (es *ExtService) GetLastErrorString() string {
+	es.mu.Lock()
+	defer es.mu.Unlock()
+	return es.lastErrorString
+}
+
+func (es *ExtService) Wait() {
+	_, _ = es.nc2.Request(subjectServiceStop, []byte("stop"), 5*time.Second)
+
+	// Create a channel to signal when the process exits
+	done := make(chan error, 1)
+
+	// Start a goroutine to wait for the process to finish
+	go func() {
+		done <- es.cmd.Wait()
+	}()
+
+	// Use a select statement to wait for either the process to exit or a timeout
+	select {
+	case err := <-done:
+		if err != nil {
+			es.t.Fatalf("process exited with error: %v", err)
+		} else {
+			logMessage(1, fmt.Sprintf("process exited successfully, code: %d", es.cmd.ProcessState.ExitCode()))
+		}
+	case <-time.After(5 * time.Second):
+		println("process timed out, killing process...")
+		if killErr := es.cmd.Process.Kill(); killErr != nil {
+			es.t.Fatalf("failed to kill process: %v", killErr)
+		} else {
+			logMessage(1, "process killed successfully")
+		}
+	}
+}
+
+func createVars(name string, s *CalloutSuite) *CompatVars {
+	opts := s.env.ServiceUserOpts()
+	opts1 := &nats.Options{}
+
+	for _, opt := range opts {
+		err := opt(opts1)
+		if err != nil {
+			s.T().Fatalf("can't set opts: %v", err)
+		}
+	}
+
+	opts2 := NATSOptions{
+		Secure:           opts1.Secure,
+		AllowReconnect:   opts1.AllowReconnect,
+		MaxReconnect:     opts1.MaxReconnect,
+		ReconnectWait:    opts1.ReconnectWait,
+		Timeout:          opts1.Timeout,
+		PingInterval:     opts1.PingInterval,
+		MaxPingsOut:      opts1.MaxPingsOut,
+		ReconnectBufSize: opts1.ReconnectBufSize,
+		SubChanLen:       opts1.SubChanLen,
+		User:             opts1.User,
+		Password:         opts1.Password,
+		Token:            opts1.Token,
+	}
+
+	seed, err := s.env.AccountKey().Seed()
+	if err != nil {
+		s.T().Fatalf("failed to get account seed: %v", err)
+	}
+
+	pk, err := s.env.AccountKey().PublicKey()
+	if err != nil {
+		s.T().Fatalf("failed to get account pk: %v", err)
+	}
+
+	return &CompatVars{
+		Name:         name,
+		NatsTestUrls: s.ns2.NatsURLs(),
+		NatsUrls:     s.ns.NatsURLs(),
+		NatsOpts:     opts2,
+		Audience:     s.env.Audience(),
+		UserInfoSubj: nst.UserInfoSubj,
+		AccountKey: CompatKey{
+			Seed: string(seed),
+			Pk:   pk,
+		},
+	}
+}
+
+var globalDebugLevel int
+
+func init() {
+	globalDebugLevel = getDebugLevel()
+}
+
+func getDebugLevel() int {
+	if debugEnv, exists := os.LookupEnv("X_COMPAT_DEBUG"); exists {
+		switch strings.ToLower(debugEnv) {
+		case "no", "off", "false":
+			return 0
+		default:
+			if num, err := strconv.Atoi(debugEnv); err == nil {
+				return num
+			} else {
+				return 1
+			}
+		}
+	}
+	return 0
+}
+
+func logMessage(level int, message string) {
+	if level <= globalDebugLevel {
+		fmt.Printf("[TEST] [%d] %s\n", level, message)
+	}
+}

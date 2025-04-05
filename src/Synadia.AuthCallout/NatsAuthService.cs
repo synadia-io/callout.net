@@ -40,21 +40,21 @@ public class NatsAuthService : INatsAuthService
     }
 
     /// <inheritdoc />
-    public async ValueTask StartAsync()
+    public async ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
-        _server = await _svc.AddServiceAsync("auth-server", "1.0.0");
+        _server = await _svc.AddServiceAsync("auth-server", "1.0.0", cancellationToken: cancellationToken);
         await _server.AddEndpointAsync<byte[]>(
             handler: async msg =>
             {
                 try
                 {
-                    byte[] token = await ProcessRequestAsync(msg);
+                    byte[] token = await ProcessRequestAsync(msg, cancellationToken);
                     if (token.Length == 0)
                     {
                         return;
                     }
 
-                    await msg.ReplyAsync(token);
+                    await msg.ReplyAsync(token, cancellationToken: cancellationToken);
                 }
                 catch (Exception e)
                 {
@@ -63,7 +63,7 @@ public class NatsAuthService : INatsAuthService
                     {
                         try
                         {
-                            await errorHandler(e);
+                            await errorHandler(e, cancellationToken);
                         }
                         catch (Exception e2)
                         {
@@ -73,11 +73,12 @@ public class NatsAuthService : INatsAuthService
                 }
             },
             name: "auth-request-handler",
-            subject: SysRequestUserAuthSubj);
+            subject: SysRequestUserAuthSubj,
+            cancellationToken: cancellationToken);
     }
 
     /// <inheritdoc />
-    public async ValueTask<byte[]> ProcessRequestAsync(NatsSvcMsg<byte[]> msg)
+    public async ValueTask<byte[]> ProcessRequestAsync(NatsSvcMsg<byte[]> msg, CancellationToken cancellationToken = default)
     {
         var (isEncrypted, req) = DecodeJwt(msg);
         var res = new NatsAuthorizationResponseClaims
@@ -86,7 +87,7 @@ public class NatsAuthService : INatsAuthService
             Audience = req.NatsServer.Id,
         };
 
-        string user = await _opts.Authorizer(req);
+        string user = await _opts.Authorizer(req, cancellationToken);
 
         if (user == string.Empty)
         {
@@ -95,7 +96,7 @@ public class NatsAuthService : INatsAuthService
             {
                 try
                 {
-                    await errorHandler(new NatsAuthServiceAuthException("Error authorizing: authorizer didn't generate a JWT", req.UserNKey));
+                    await errorHandler(new NatsAuthServiceAuthException("Error authorizing: authorizer didn't generate a JWT", req.UserNKey), cancellationToken);
                 }
                 catch (Exception e2)
                 {
@@ -108,7 +109,7 @@ public class NatsAuthService : INatsAuthService
 
         res.AuthorizationResponse.Jwt = user;
 
-        string tokenString = await _opts.ResponseSigner(res);
+        string tokenString = await _opts.ResponseSigner(res, cancellationToken);
         byte[] token = Encoding.ASCII.GetBytes(tokenString);
 
         if (isEncrypted)

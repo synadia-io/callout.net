@@ -16,7 +16,9 @@ public record NatsAuthServiceOpts
     /// </summary>
     /// <param name="authorizer">Authorizer callback.</param>
     /// <param name="responseSigner">Response signer callback.</param>
-    public NatsAuthServiceOpts(Func<NatsAuthorizationRequest, ValueTask<string>> authorizer, Func<NatsAuthorizationResponseClaims, ValueTask<string>> responseSigner)
+    public NatsAuthServiceOpts(
+        Func<NatsAuthorizationRequest, CancellationToken, ValueTask<string>> authorizer,
+        Func<NatsAuthorizationResponseClaims, CancellationToken, ValueTask<string>> responseSigner)
     {
         Authorizer = authorizer;
         ResponseSigner = responseSigner;
@@ -32,15 +34,15 @@ public record NatsAuthServiceOpts
     /// <summary>
     /// Gets a function that processes authorization request and issues user JWTs.
     /// </summary>
-    public Func<NatsAuthorizationRequest, ValueTask<string>> Authorizer { get; init; }
+    public Func<NatsAuthorizationRequest, CancellationToken, ValueTask<string>> Authorizer { get; init; }
 
     /// <summary>
     /// Gets a function that performs the signing of the <see cref="NatsAuthorizationResponseClaims"/>.
     /// </summary>
-    public Func<NatsAuthorizationResponseClaims, ValueTask<string>> ResponseSigner { get; init; }
+    public Func<NatsAuthorizationResponseClaims, CancellationToken, ValueTask<string>> ResponseSigner { get; init; }
 
     /// <summary>
     /// Gets a delegate for handling exceptions that occur during authorization.
     /// </summary>
-    public Func<Exception, ValueTask>? ErrorHandler { get; init; }
+    public Func<Exception, CancellationToken, ValueTask>? ErrorHandler { get; init; }
 }

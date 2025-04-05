@@ -88,7 +88,7 @@ public class AuthServiceTest(ITestOutputHelper output)
         await authNats.PingAsync();
 
         var opts = new NatsAuthServiceOpts(
-            authorizer: r =>
+            authorizer: (r, ct) =>
             {
                 NatsUserClaims user = jwt.NewUserClaims(r.UserNKey);
                 user.Audience = "AUTH";
@@ -103,9 +103,9 @@ public class AuthServiceTest(ITestOutputHelper output)
 
                 return ValueTask.FromResult(jwt.EncodeUserClaims(user, akp));
             },
-            responseSigner: r => ValueTask.FromResult(jwt.EncodeAuthorizationResponseClaims(r, akp)))
+            responseSigner: (r, ct) => ValueTask.FromResult(jwt.EncodeAuthorizationResponseClaims(r, akp)))
         {
-            ErrorHandler = e =>
+            ErrorHandler = (e, ct) =>
             {
                 output.WriteLine($"SERVICE ERROR: {e}");
                 return default;
@@ -162,7 +162,7 @@ public class AuthServiceTest(ITestOutputHelper output)
         await authNats.PingAsync();
 
         var opts = new NatsAuthServiceOpts(
-            authorizer: r =>
+            authorizer: (r, ct) =>
             {
                 NatsUserClaims user = jwt.NewUserClaims(r.UserNKey);
                 user.Audience = "AUTH";
@@ -177,10 +177,10 @@ public class AuthServiceTest(ITestOutputHelper output)
 
                 return ValueTask.FromResult(jwt.EncodeUserClaims(user, akp));
             },
-            responseSigner: r => ValueTask.FromResult(jwt.EncodeAuthorizationResponseClaims(r, akp)))
+            responseSigner: (r, ct) => ValueTask.FromResult(jwt.EncodeAuthorizationResponseClaims(r, akp)))
         {
             EncryptionKey = xkp,
-            ErrorHandler = e =>
+            ErrorHandler = (e, ct) =>
             {
                 output.WriteLine($"SERVICE ERROR: {e}");
                 return default;

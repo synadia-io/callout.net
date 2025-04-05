@@ -8,6 +8,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using NATS.Client.Core;
 using NATS.Jwt;
 using NATS.Jwt.Models;
@@ -19,44 +20,78 @@ namespace Compat;
 
 public class Testing
 {
+    private const string SetupOk = "setup_ok";
+    private const string BasicAccountEnv = "basic_account_env";
+    private const string BasicEncryptedEnv = "basic_encrypted_env";
+    private const string DelegatedEnv = "delegated_env";
+    private const string DelegatedKeysEnv = "delegated_keys_env";
+
+    private const string SubjectServiceAll = "test.service.>";
+    private const string SubjectServiceStop = "test.service.stop";
+    private const string SubjectDriverConnected = "test.driver.connected";
+    private const string SubjectDriverError = "test.driver.error";
+    private const string SubjectDriverVars = "test.driver.vars";
+
+    private const string LogName = "SERV";
+    private const string EnvCompatDebug = "X_COMPAT_DEBUG";
     private const string CompatRoot = ".compat.root";
     private readonly string[] _args;
     private readonly string _cwd;
     private readonly string _exe;
+    private readonly int _debug;
 
     public Testing(string[] args)
     {
         _args = args;
         _exe = Path.GetFullPath(Process.GetCurrentProcess().MainModule!.FileName);
-        Console.WriteLine($">>> EXE: {Process.GetCurrentProcess().MainModule!.FileName}");
-        Console.WriteLine($">>> EXE: {_exe}");
         _cwd = SetCurrentDirectoryToProjectRoot();
+        _debug = GetDebugFlagValue();
+        Log(1, $" exe path {_exe}");
+    }
+
+    void Log(int level, string message)
+    {
+        if (level <= _debug)
+        {
+            Console.WriteLine($"[{LogName}] [{level}] {message}");
+        }
+    }
+
+    void Err(string message)
+    {
+        Console.Error.WriteLine($"[{LogName}] ERROR {message}");
+    }
+
+    private int GetDebugFlagValue()
+    {
+        string? debugString = Environment.GetEnvironmentVariable(EnvCompatDebug);
+        if (debugString == null)
+        {
+            return 0;
+        }
+
+        debugString = debugString.Trim().ToLowerInvariant();
+        if (Regex.IsMatch(debugString, @"^(-|\+)?\s*\d+$"))
+        {
+            return int.Parse(debugString);
+        }
+
+        return Regex.IsMatch(debugString, @"^(false|no|off)$") ? 0 : 1;
     }
 
     public int Run()
     {
         if (_args.Length > 0 && _args[0] == "-r")
         {
-            Console.WriteLine(">>> Running tests");
-            if (_args.Length > 1 && _args[1] == "-")
+            Log(1, "Running tests...");
+            if (_args.Length > 1)
             {
-                string? b64 = Console.In.ReadLine();
-                if (b64 != null)
-                {
-                    var json = JsonNode.Parse(Convert.FromBase64String(b64));
-                    Console.WriteLine($"JSON: {json}");
-                    Console.WriteLine(">>> end of JSON");
-                    Connect(json);
-                }
-                else
-                {
-                    Console.Error.WriteLine("Expected JSON data in stdin");
-                    return 1;
-                }
+                string natsCoordinationUrl = _args[1];
+                StartAuthServiceAndWaitForTests(natsCoordinationUrl);
             }
             else
             {
-                Console.Error.WriteLine("No JSON data provided");
+                Err("No NATS tests coordination URL provided");
                 return 1;
             }
 
@@ -66,109 +101,135 @@ public class Testing
         var go = new Go(_cwd, _exe);
         int e = go.Test();
 
-        Console.WriteLine("Bye!");
+        Log(1, "Bye!");
 
         return e;
     }
 
-    private void Connect(JsonNode? json)
+    private void StartAuthServiceAndWaitForTests(string natsCoordiantionUrl)
     {
-        Console.WriteLine("Connecting...");
-
-        string url;
-        string username;
-        string password;
-        string token;
-        string audience;
-        string userInfoSubj;
-        KeyPair akp;
-        try
-        {
-            url = json!["nats_urls"]!
-                .AsArray()
-                .Select(x => x!.GetValue<string>())
-                .First();
-
-            // .First(x => x.Contains("127.0.0.1"));
-            username = json["nats_opts"]!["user"]!.GetValue<string>();
-            password = json["nats_opts"]!["password"]!.GetValue<string>();
-            audience = json["audience"]!.GetValue<string>();
-            userInfoSubj = json["user_info_subj"]!.GetValue<string>();
-            token = json["nats_opts"]!["token"]!.GetValue<string>();
-            string accountSeed = json["account_key"]!["seed"]!.GetValue<string>();
-            string accountPk = json["account_key"]!["pk"]!.GetValue<string>();
-            akp = KeyPair.FromSeed(accountSeed);
-            if (accountPk != akp.GetPublicKey())
-            {
-                throw new Exception("Invalid account key");
-            }
-        }
-        catch (Exception e)
-        {
-            Console.Error.WriteLine($"Error parsing JSON: {e}");
-            return;
-        }
-
-        Console.WriteLine($"""
-                           >>> Connecting to NATS server: {url}
-                               username: {username}
-                               password: {password}
-                               token: {token}
-                               account seed: {akp.GetSeed()}
-                               account key: {akp.GetPublicKey()}
-                           """);
-
+        Log(2, $"Connecting to '{natsCoordiantionUrl}'...");
         Task.Run(async () =>
         {
+            await using var nt = new NatsConnection(new NatsOpts { Url = natsCoordiantionUrl });
+            var rttTest = await nt.PingAsync();
+            Log(1, $"Ping to test coordination server {natsCoordiantionUrl}: {rttTest}");
+            var cts = new CancellationTokenSource();
+            var tcs = new TaskCompletionSource();
+            var testSub = Task.Run(async () =>
+            {
+                await foreach (NatsMsg<string> m in nt.SubscribeAsync<string>(SubjectServiceAll, cancellationToken: cts.Token))
+                {
+                    if (m.Subject == SubjectServiceStop)
+                    {
+                        Log(2, "Stopping test service");
+                        await cts.CancelAsync();
+                        tcs.TrySetResult();
+                        break;
+                    }
+                }
+            }, cts.Token);
+
+            var jsonString = await nt.RequestAsync<string>(SubjectDriverVars, cancellationToken: cts.Token);
+            var json = JsonNode.Parse(jsonString.Data);
+
+            string name;
+            string url;
+            string username;
+            string password;
+            string token;
+            string audience;
+            string userInfoSubj;
+            KeyPair akp;
+            try
+            {
+                name = json["name"]!.GetValue<string>();
+                url = json!["nats_urls"]!.AsArray().First().GetValue<string>();
+                username = json["nats_opts"]!["user"]!.GetValue<string>();
+                password = json["nats_opts"]!["password"]!.GetValue<string>();
+                audience = json["audience"]!.GetValue<string>();
+                userInfoSubj = json["user_info_subj"]!.GetValue<string>();
+                token = json["nats_opts"]!["token"]!.GetValue<string>();
+                string accountSeed = json["account_key"]!["seed"]!.GetValue<string>();
+                string accountPk = json["account_key"]!["pk"]!.GetValue<string>();
+                akp = KeyPair.FromSeed(accountSeed);
+                if (accountPk != akp.GetPublicKey())
+                {
+                    throw new Exception("Invalid account key");
+                }
+            }
+            catch (Exception e)
+            {
+                Err($"Error parsing JSON: {e}");
+                return;
+            }
+
+            Log(3, $$"""
+                     VARS:
+                         name: {{name}}
+                         connecting to server: {{url}}
+                         username: {{username}}
+                         password: {{password}}
+                         token: {{token}}
+                         account seed: {{akp.GetSeed()}}
+                         account key: {{akp.GetPublicKey()}}
+                     """);
+
             await using var connection = new NatsConnection(new NatsOpts
             {
-                Url = url,
-                AuthOpts = new NatsAuthOpts
-                {
-                    Username = username,
-                    Password = password,
-                    Token = token,
-                },
+                Url = url, AuthOpts = new NatsAuthOpts { Username = username, Password = password, Token = token, },
             });
-            var rtt = await connection.PingAsync();
-            Console.WriteLine($"RTT: {rtt}");
+            var rtt = await connection.PingAsync(cts.Token);
+            Log(3, $"Connection RTT {rtt}");
 
             var jwt = new NatsJwt();
 
-            ValueTask<string> Authorizer(NatsAuthorizationRequest r)
+            ValueTask<string> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
             {
-                Console.WriteLine($">>> USER CONNECTING: {r.NatsConnectOptions.Username}");
+                if (name == SetupOk)
+                {
+                    Log(2, $"Auth user: {r.NatsConnectOptions.Username}");
+                    NatsUserClaims user = jwt.NewUserClaims(r.UserNKey);
+                    user.Audience = audience;
+                    user.User.Pub.Allow = [userInfoSubj];
+                    user.User.Sub.Allow = ["_INBOX.>"];
+                    user.Expires = DateTimeOffset.Now + TimeSpan.FromSeconds(90);
+                    return ValueTask.FromResult(jwt.EncodeUserClaims(user, akp));
+                }
 
-                NatsUserClaims user = jwt.NewUserClaims(r.UserNKey);
-                user.Audience = audience;
-                user.User.Pub.Allow = [userInfoSubj];
-                user.User.Sub.Allow = ["_INBOX.>"];
-                user.Expires = DateTimeOffset.Now + TimeSpan.FromSeconds(90);
-                return ValueTask.FromResult(jwt.EncodeUserClaims(user, akp));
+                throw new Exception($"Can't find Authorizer for name {name}");
             }
 
-            ValueTask<string> ResponseSigner(NatsAuthorizationResponseClaims r)
+            ValueTask<string> ResponseSigner(NatsAuthorizationResponseClaims r, CancellationToken cancellationToken)
             {
-                return ValueTask.FromResult(jwt.EncodeAuthorizationResponseClaims(r, akp));
+                if (name == SetupOk)
+                {
+                    return ValueTask.FromResult(jwt.EncodeAuthorizationResponseClaims(r, akp));
+                }
+
+                throw new Exception($"Can't find ResponseSigner for name {name}");
             }
 
             var opts = new NatsAuthServiceOpts(Authorizer, ResponseSigner)
             {
-                ErrorHandler = e =>
+                ErrorHandler = async (e, ct) =>
                 {
-                    Console.WriteLine($"ERROR: {e}");
-                    return default;
+                    Err($"Auth error: {e}");
+                    await nt.PublishAsync(SubjectDriverError, e.Message, cancellationToken: ct);
                 },
             };
 
             await using var service = new NatsAuthService(connection.CreateServicesContext(), opts);
 
-            await service.StartAsync();
+            await service.StartAsync(cts.Token);
 
-            new ManualResetEventSlim().Wait();
+            await nt.RequestAsync<string>(SubjectDriverConnected, cancellationToken: cts.Token);
+
+            await tcs.Task;
+            await testSub;
         }).Wait();
 
-        Console.WriteLine("CONNECT DONE");
+        Log(2, "Service stopped");
     }
 
     private static string SetCurrentDirectoryToProjectRoot()

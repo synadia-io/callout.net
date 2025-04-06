@@ -8,6 +8,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
 using NATS.Client.Core;
 using NATS.Jwt;
 using NATS.Jwt.Models;
@@ -59,9 +60,11 @@ public class Testing
         return cwd.FullName;
     }
 
+    bool WillLog(int level) => level <= _debug;
+
     void Log(int level, string message)
     {
-        if (level <= _debug)
+        if (WillLog(level))
         {
             Console.WriteLine($"[{LogName}] [{level}] {message}");
         }
@@ -129,7 +132,7 @@ public class Testing
         return e;
     }
 
-    private static async Task InitializeAndStartNatsAuthServiceAndWait(T t, NatsAuthServiceOpts opts)
+    private static async Task InitializeAndStartAuthServiceAndWait(T t, NatsAuthServiceOpts opts)
     {
         await using var service = new NatsAuthService(t.connection.CreateServicesContext(), opts);
         await service.StartAsync(t.cts.Token);
@@ -180,6 +183,11 @@ public class Testing
 
             var jsonMsg = await nt.RequestAsync<string>(Subject(SubjectDriverVars), cancellationToken: cts.Token);
 
+            if (WillLog(4))
+            {
+                Log(4, JsonNode.Parse(jsonMsg.Data).ToString());
+            }
+
             CompatVars cv = CompatVars.FromJson(suitName, jsonMsg.Data);
 
             await using var connection = new NatsConnection(new()
@@ -196,6 +204,7 @@ public class Testing
             {
                 suitName = suitName,
                 name = name,
+                env = env,
                 cv = cv,
                 cts = cts,
                 tcs = tcs,
@@ -240,7 +249,7 @@ public class Testing
             EncryptionKey = t.cv.Ekp == null ? KeyPair.CreatePair(PrefixByte.Curve) : null,
         };
 
-        await InitializeAndStartNatsAuthServiceAndWait(t, opts);
+        await InitializeAndStartAuthServiceAndWait(t, opts);
     }
 
     public async Task TestSetupOK(T t)
@@ -253,21 +262,20 @@ public class Testing
             user.User.Pub.Allow = [t.cv.UserInfoSubj];
             user.User.Sub.Allow = ["_INBOX.>"];
             user.Expires = DateTimeOffset.Now + TimeSpan.FromSeconds(90);
-            return ValueTask.FromResult(t.jwt.EncodeUserClaims(user, t.cv.Akp));
+            return ValueTask.FromResult(t.jwt.EncodeUserClaims(user, t.cv.AccountKeys["A"]));
         }
 
         ValueTask<string> ResponseSigner(NatsAuthorizationResponseClaims r, CancellationToken cancellationToken)
         {
-            return ValueTask.FromResult(t.jwt.EncodeAuthorizationResponseClaims(r, t.cv.Akp));
+            return ValueTask.FromResult(t.jwt.EncodeAuthorizationResponseClaims(r, t.cv.AccountKeys["A"]));
         }
 
         NatsAuthServiceOpts opts = new(Authorizer, ResponseSigner)
         {
-            ErrorHandler = CreateAuthServiceErrorHandler(t),
-            EncryptionKey = t.cv.Ekp,
+            ErrorHandler = CreateAuthServiceErrorHandler(t), EncryptionKey = t.cv.Ekp,
         };
 
-        await InitializeAndStartNatsAuthServiceAndWait(t, opts);
+        await InitializeAndStartAuthServiceAndWait(t, opts);
     }
 }
 
@@ -280,7 +288,8 @@ public record T
     public NatsConnection connection { get; init; }
     public string name { get; init; }
     public string suitName { get; init; }
-    public NatsJwt jwt { get; set; }
+    public NatsJwt jwt { get; init; }
+    public string env { get; init; }
 
     public string Subject(string suffix)
     {
@@ -299,7 +308,8 @@ public record CompatVars
     public string Token { get; init; }
     public string Audience { get; init; }
     public string UserInfoSubj { get; init; }
-    public KeyPair? Akp { get; init; }
+
+    public Dictionary<string, KeyPair> AccountKeys { get; init; }
     public KeyPair? Ekp { get; init; }
 
     public static CompatVars FromJson(string suitName, string jsonString)
@@ -314,15 +324,21 @@ public record CompatVars
             throw new Exception("Failed to parse JSON");
         }
 
-        KeyPair? akp = null;
-        string accountSeed = json["account_key"]!["seed"]!.GetValue<string>();
-        string accountPk = json["account_key"]!["pk"]!.GetValue<string>();
-        if (!string.IsNullOrEmpty(accountSeed))
+        Dictionary<string, KeyPair> keys = new();
+        foreach ((string? key, JsonNode? value) in json["account_keys"].AsObject())
         {
-            akp = KeyPair.FromSeed(accountSeed);
-            if (accountPk != akp.GetPublicKey())
+            if (string.IsNullOrWhiteSpace(key) || value == null) continue;
+            string seed = value["seed"]!.GetValue<string>();
+            string pk = value["pk"]!.GetValue<string>();
+            if (!string.IsNullOrEmpty(seed))
             {
-                throw new Exception("Invalid account key");
+                var kp = KeyPair.FromSeed(seed);
+                if (pk != kp.GetPublicKey())
+                {
+                    throw new Exception("Invalid account key");
+                }
+
+                keys[key] = kp;
             }
         }
 
@@ -349,8 +365,215 @@ public record CompatVars
             Token = json["nats_opts"]!["token"]!.GetValue<string>(),
             Audience = json["audience"]!.GetValue<string>(),
             UserInfoSubj = json["user_info_subj"]!.GetValue<string>(),
-            Akp = akp,
+            Dir = json["dir"]!.GetValue<string>(),
+            NscDir = json["nsc_dir"]!.GetValue<string>(),
             Ekp = ekp,
+            AccountKeys = keys,
+        };
+    }
+
+    public string NscDir { get; init; }
+
+    public string Dir { get; init; }
+}
+
+class NscStore
+{
+    private readonly DirectoryInfo _dir;
+    private readonly DirectoryInfo _stores;
+    private readonly DirectoryInfo _keys;
+
+    public NscStore(string dir)
+    {
+        _dir = new DirectoryInfo(dir);
+        _stores = new DirectoryInfo(Path.Combine(dir, "stores"));
+        _keys = new DirectoryInfo(Path.Combine(dir, "keys", "keys"));
+    }
+
+    public IEnumerable<NscOperator> LoadOperators()
+    {
+        foreach (DirectoryInfo d in _stores.GetDirectories())
+        {
+            yield return NscOperator.Load(this, d);
+        }
+    }
+
+    public KeyPair? LoadKey(string? pk)
+    {
+        if (pk == null)
+        {
+            return null;
+        }
+
+        string nk = Path.Combine(_keys.FullName, pk[..1], pk[1..3], $"{pk}.nk");
+        KeyPair kp = KeyPair.FromSeed(File.ReadAllText(nk));
+        if (kp.GetPublicKey() != pk)
+        {
+            throw new Exception($"Load key error: invalid key {pk}");
+        }
+
+        return kp;
+    }
+
+    public JsonNode LoadJwtPayload(DirectoryInfo dir)
+    {
+        return LoadJwtPayload(dir.GetFiles().First(f => f.Extension == ".jwt"));
+    }
+
+    public JsonNode LoadJwtPayload(FileInfo file)
+    {
+        string jwt = file.OpenText().ReadToEnd();
+        return JsonNode.Parse(EncodingUtils.FromBase64UrlEncoded(jwt.Split('.')[1]));
+    }
+
+    public (KeyPair Issuer, KeyPair Subject) GetIssuerAndSubjectKeys(JsonNode json)
+    {
+        string iss = json["iss"].GetValue<string>();
+        string sub = json["sub"].GetValue<string>();
+        return (LoadKey(iss), LoadKey(sub));
+    }
+}
+
+record NscEntry
+{
+    public string Name { get; init; }
+    public KeyPair Issuer { get; init; }
+    public KeyPair Subject { get; init; }
+    public JsonNode JwtPayload { get; init; }
+}
+
+record NscOperator : NscEntry
+{
+    public static NscOperator Load(NscStore store, DirectoryInfo dir)
+    {
+        var payload = store.LoadJwtPayload(dir);
+        (KeyPair issuer, KeyPair subject) = store.GetIssuerAndSubjectKeys(payload);
+
+        var systemAccount = store.LoadKey(payload["nats"]?["system_account"]?.GetValue<string>());
+
+        var accounts = new List<NscAccount>();
+        foreach (DirectoryInfo d in dir.GetDirectories().First(f => f.Name == "accounts").GetDirectories())
+        {
+            accounts.Add(NscAccount.Load(store, d));
+        }
+
+        return new NscOperator
+        {
+            Name = dir.Name,
+            JwtPayload = payload,
+            Issuer = issuer,
+            Subject = subject,
+            Accounts = accounts,
+            SystemAccount = systemAccount,
+        };
+    }
+
+    public KeyPair? SystemAccount { get; init; }
+    public List<NscAccount> Accounts { get; init; } = new();
+}
+
+record NscAccount : NscEntry
+{
+    public List<NscUser> Users { get; init; } = new();
+
+    public List<KeyPair> SigningKeys { get; init; } = new();
+
+    public List<KeyPair> AuthorizationAllowedAccounts { get; init; } = new();
+
+    public List<KeyPair> AuthorizationAuthUsers { get; init; } = new();
+
+    public static NscAccount Load(NscStore store, DirectoryInfo dir)
+    {
+        var payload = store.LoadJwtPayload(dir);
+        (KeyPair issuer, KeyPair subject) = store.GetIssuerAndSubjectKeys(payload);
+
+        var signingKeys = new List<KeyPair>();
+        if (payload["nats"]?["signing_keys"]?.AsArray() is { } keysArray)
+        {
+            foreach (JsonNode? jsonNode in keysArray)
+            {
+                if (jsonNode == null)
+                {
+                    continue;
+                }
+                string? key = jsonNode.GetValue<string>();
+                KeyPair? signingKey = store.LoadKey(key);
+                if (signingKey != null)
+                {
+                    signingKeys.Add(signingKey);
+                }
+            }
+        }
+
+        var authorizationAllowedAccounts = new List<KeyPair>();
+        if (payload["nats"]?["authorization"]?["allowed_accounts"]?.AsArray() is { } keysArray2)
+        {
+            foreach (JsonNode? jsonNode in keysArray2)
+            {
+                if (jsonNode == null)
+                {
+                    continue;
+                }
+                string? key = jsonNode.GetValue<string>();
+                KeyPair? signingKey = store.LoadKey(key);
+                if (signingKey != null)
+                {
+                    authorizationAllowedAccounts.Add(signingKey);
+                }
+            }
+        }
+
+        var authorizationAuthUsers = new List<KeyPair>();
+        if (payload["nats"]?["authorization"]?["auth_users"]?.AsArray() is { } keysArray3)
+        {
+            foreach (JsonNode? jsonNode in keysArray3)
+            {
+                if (jsonNode == null)
+                {
+                    continue;
+                }
+                string? key = jsonNode.GetValue<string>();
+                KeyPair? signingKey = store.LoadKey(key);
+                if (signingKey != null)
+                {
+                    authorizationAuthUsers.Add(signingKey);
+                }
+            }
+        }
+
+        var users = new List<NscUser>();
+        DirectoryInfo usersDir = dir.GetDirectories().FirstOrDefault(f => f.Name == "users");
+        if (usersDir != null)
+        {
+            foreach (FileInfo j in usersDir.GetFiles().Where(f => f.Extension == ".jwt"))
+            {
+                users.Add(NscUser.Load(store, j));
+            }
+        }
+
+        return new NscAccount
+        {
+            Name = dir.Name,
+            JwtPayload = payload,
+            SigningKeys = signingKeys,
+            AuthorizationAllowedAccounts = authorizationAllowedAccounts,
+            AuthorizationAuthUsers = authorizationAuthUsers,
+            Issuer = issuer,
+            Subject = subject,
+            Users = users,
+        };
+    }
+}
+
+record NscUser : NscEntry
+{
+    public static NscUser Load(NscStore store, FileInfo file)
+    {
+        var payload = store.LoadJwtPayload(file);
+        (KeyPair issuer, KeyPair subject) = store.GetIssuerAndSubjectKeys(payload);
+        return new NscUser
+        {
+            Name = file.Name, JwtPayload = payload, Issuer = issuer, Subject = subject,
         };
     }
 }

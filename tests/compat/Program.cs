@@ -27,5 +27,20 @@
 
 using Compat;
 
+// var store = new NscStore("C:\\Users\\mtmk\\.local\\share\\nats\\nsc");
+// foreach (NscOperator op in store.LoadOperators())
+// {
+//     Console.WriteLine(op);
+//     foreach (NscAccount acc in op.Accounts)
+//     {
+//         Console.WriteLine(acc);
+//         foreach (NscUser user in acc.Users)
+//         {
+//             Console.WriteLine(user);
+//         }
+//     }
+// }
+// return 1;
+
 var t = new Testing(args);
 return t.Run();

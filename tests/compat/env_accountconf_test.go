@@ -90,6 +90,8 @@ func (bc *BasicAccountEnv) ServiceAudience() string {
 //	}
 //}
 
-func (bc *BasicAccountEnv) AccountKey() nkeys.KeyPair {
-	return bc.akp
+func (bc *BasicAccountEnv) GetAccounts() map[string]nkeys.KeyPair {
+	return map[string]nkeys.KeyPair{
+		"A": bc.akp,
+	}
 }

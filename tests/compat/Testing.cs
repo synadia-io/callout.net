@@ -133,7 +133,7 @@ public class Testing
         return e;
     }
 
-    private static async Task InitializeAndStartAuthServiceAndWait(T t, NatsAuthServiceOpts opts)
+    private static async Task InitializeAndStartAuthServiceAndWait(TestContext t, NatsAuthServiceOpts opts)
     {
         await using var service = new NatsAuthService(t.connection.CreateServicesContext(), opts);
         await service.StartAsync(t.cts.Token);
@@ -141,7 +141,7 @@ public class Testing
         await t.tcs.Task;
     }
 
-    private Func<Exception, CancellationToken, ValueTask> CreateAuthServiceErrorHandler(T t) => async (e, ct) =>
+    private Func<Exception, CancellationToken, ValueTask> CreateAuthServiceErrorHandler(TestContext t) => async (e, ct) =>
     {
         Log(1, $"Auth error: {e}");
         await t.nt.PublishAsync(t.Subject(SubjectDriverError), e.Message, cancellationToken: ct);
@@ -211,7 +211,7 @@ public class Testing
 
             Log(3, $"{cv}");
 
-            var t = new T
+            var t = new TestContext
             {
                 suitName = suitName,
                 name = name,
@@ -239,7 +239,7 @@ public class Testing
         Log(2, "Service stopped");
     }
 
-    public async Task TestEncryptionMismatch(T t)
+    public async Task TestEncryptionMismatch(TestContext t)
     {
         ValueTask<string> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
         {
@@ -263,9 +263,9 @@ public class Testing
         await InitializeAndStartAuthServiceAndWait(t, opts);
     }
 
-    public async Task TestSetupOK(T t)
+    public async Task TestSetupOK(TestContext t)
     {
-        ValueTask<string> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
+        async ValueTask<string> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
         {
             Log(2, $"Auth user: {r.NatsConnectOptions.Username}");
             NatsUserClaims user = t.jwt.NewUserClaims(r.UserNKey);
@@ -274,34 +274,12 @@ public class Testing
             user.User.Sub.Allow = ["_INBOX.>"];
             user.Expires = DateTimeOffset.Now + TimeSpan.FromSeconds(90);
 
-            if (t.cv.Env.StartsWith("TestDelegated"))
-            {
-                var store = new NscStore(t.cv.NscDir);
-                var op = store.LoadOperators().First(o => o.Name == "O");
-                var a = op.Accounts.First(a => a.Name == "A");
-                user.User.IssuerAccount = a.Subject.GetPublicKey();
-                return ValueTask.FromResult(t.jwt.EncodeUserClaims(user, a.SigningKeys[0]));
-            }
-            else
-            {
-                return ValueTask.FromResult(t.jwt.EncodeUserClaims(user, t.cv.AccountKeys["A"]));
-            }
+            return t.Encoder.Encode(user);
         }
 
-        ValueTask<string> ResponseSigner(NatsAuthorizationResponseClaims r, CancellationToken cancellationToken)
+        async ValueTask<string> ResponseSigner(NatsAuthorizationResponseClaims r, CancellationToken cancellationToken)
         {
-            if (t.cv.Env.StartsWith("TestDelegated"))
-            {
-                var store = new NscStore(t.cv.NscDir);
-                var op = store.LoadOperators().First(o => o.Name == "O");
-                var c = op.Accounts.First(a => a.Name == "C");
-                r.AuthorizationResponse.IssuerAccount = c.Subject.GetPublicKey();
-                return ValueTask.FromResult(t.jwt.EncodeAuthorizationResponseClaims(r, c.SigningKeys[0]));
-            }
-            else
-            {
-                return ValueTask.FromResult(t.jwt.EncodeAuthorizationResponseClaims(r, t.cv.AccountKeys["A"]));
-            }
+            return t.Encoder.Encode(r);
         }
 
         NatsAuthServiceOpts opts = new(Authorizer, ResponseSigner)
@@ -312,9 +290,9 @@ public class Testing
         await InitializeAndStartAuthServiceAndWait(t, opts);
     }
 
-    public async Task TestAbortRequest(T t)
+    public async Task TestAbortRequest(TestContext t)
     {
-        ValueTask<string> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
+        async ValueTask<string> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
         {
             Log(2, $"Auth user: {r.NatsConnectOptions.Username}");
 
@@ -330,7 +308,7 @@ public class Testing
 
             if (r.NatsConnectOptions.Username == "blank")
             {
-                return ValueTask.FromResult("");
+                return "";
             }
 
             NatsUserClaims user = t.jwt.NewUserClaims(r.UserNKey);
@@ -339,34 +317,12 @@ public class Testing
             user.User.Sub.Allow = ["_INBOX.>"];
             user.Expires = DateTimeOffset.Now + TimeSpan.FromSeconds(90);
 
-            if (t.cv.Env.StartsWith("TestDelegated"))
-            {
-                var store = new NscStore(t.cv.NscDir);
-                var op = store.LoadOperators().First(o => o.Name == "O");
-                var a = op.Accounts.First(a => a.Name == "A");
-                user.User.IssuerAccount = a.Subject.GetPublicKey();
-                return ValueTask.FromResult(t.jwt.EncodeUserClaims(user, a.SigningKeys[0]));
-            }
-            else
-            {
-                return ValueTask.FromResult(t.jwt.EncodeUserClaims(user, t.cv.AccountKeys["A"]));
-            }
+            return t.Encoder.Encode(user);
         }
 
-        ValueTask<string> ResponseSigner(NatsAuthorizationResponseClaims r, CancellationToken cancellationToken)
+        async ValueTask<string> ResponseSigner(NatsAuthorizationResponseClaims r, CancellationToken cancellationToken)
         {
-            if (t.cv.Env.StartsWith("TestDelegated"))
-            {
-                var store = new NscStore(t.cv.NscDir);
-                var op = store.LoadOperators().First(o => o.Name == "O");
-                var c = op.Accounts.First(a => a.Name == "C");
-                r.AuthorizationResponse.IssuerAccount = c.Subject.GetPublicKey();
-                return ValueTask.FromResult(t.jwt.EncodeAuthorizationResponseClaims(r, c.SigningKeys[0]));
-            }
-            else
-            {
-                return ValueTask.FromResult(t.jwt.EncodeAuthorizationResponseClaims(r, t.cv.AccountKeys["A"]));
-            }
+            return t.Encoder.Encode(r);
         }
 
         NatsAuthServiceOpts opts = new(Authorizer, ResponseSigner)

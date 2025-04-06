@@ -6,9 +6,43 @@
 using System.Text.Json.Nodes;
 using NATS.Client.Core;
 using NATS.Jwt;
+using NATS.Jwt.Models;
 using NATS.NKeys;
 
 namespace Compat;
+
+public record TestContext
+{
+    public CompatVars cv { get; init; }
+    public CancellationTokenSource cts { get; init; }
+    public TaskCompletionSource tcs { get; init; }
+    public NatsConnection nt { get; init; }
+    public NatsConnection connection { get; init; }
+    public string name { get; init; }
+    public string suitName { get; init; }
+    public NatsJwt jwt { get; init; }
+    public string env { get; init; }
+
+    public IClaimsEncoder Encoder
+    {
+        get
+        {
+            if (env.StartsWith("TestDelegated"))
+            {
+                return new DelegatedClaimsEncoder(this);
+            }
+            else
+            {
+                return new BasicClaimsEncoder(this);
+            }
+        }
+    }
+
+    public string Subject(string suffix)
+    {
+        return suitName + suffix;
+    }
+}
 
 public record CompatVars
 {
@@ -96,20 +130,56 @@ public record CompatVars
     public string Dir { get; init; }
 }
 
-public record T
+public interface IClaimsEncoder
 {
-    public CompatVars cv { get; init; }
-    public CancellationTokenSource cts { get; init; }
-    public TaskCompletionSource tcs { get; init; }
-    public NatsConnection nt { get; init; }
-    public NatsConnection connection { get; init; }
-    public string name { get; init; }
-    public string suitName { get; init; }
-    public NatsJwt jwt { get; init; }
-    public string env { get; init; }
+    string Encode(NatsUserClaims claims);
+    string Encode(NatsAuthorizationResponseClaims claims);
+}
 
-    public string Subject(string suffix)
+public class BasicClaimsEncoder : IClaimsEncoder
+{
+    private readonly TestContext _t;
+
+    public BasicClaimsEncoder(TestContext t)
     {
-        return suitName + suffix;
+        _t = t;
+    }
+
+    public string Encode(NatsUserClaims claims)
+    {
+        return _t.jwt.EncodeUserClaims(claims, _t.cv.AccountKeys["A"]);
+    }
+
+    public string Encode(NatsAuthorizationResponseClaims claims)
+    {
+        return _t.jwt.EncodeAuthorizationResponseClaims(claims, _t.cv.AccountKeys["A"]);
+    }
+}
+
+public class DelegatedClaimsEncoder : IClaimsEncoder
+{
+    private readonly TestContext _t;
+
+    public DelegatedClaimsEncoder(TestContext t)
+    {
+        _t = t;
+    }
+
+    public string Encode(NatsUserClaims claims)
+    {
+        var store = new NscStore(_t.cv.NscDir);
+        var op = store.LoadOperators().First(o => o.Name == "O");
+        var a = op.Accounts.First(a => a.Name == "A");
+        claims.User.IssuerAccount = a.Subject.GetPublicKey();
+        return _t.jwt.EncodeUserClaims(claims, a.SigningKeys[0]);
+    }
+
+    public string Encode(NatsAuthorizationResponseClaims claims)
+    {
+        var store = new NscStore(_t.cv.NscDir);
+        var op = store.LoadOperators().First(o => o.Name == "O");
+        var c = op.Accounts.First(a => a.Name == "C");
+        claims.AuthorizationResponse.IssuerAccount = c.Subject.GetPublicKey();
+        return _t.jwt.EncodeAuthorizationResponseClaims(claims, c.SigningKeys[0]);
     }
 }

@@ -3,9 +3,8 @@
 
 #pragma warning disable
 
-using System.ComponentModel;
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -20,31 +19,6 @@ namespace Compat;
 
 public class Testing
 {
-    private const string compatTestEncryptionMismatch = "TestEncryptionMismatch";
-    private const string compatTestAuthorizerIsRequired = "TestAuthorizerIsRequired";
-    private const string compatTestSignerOrKeys = "TestSignerOrKeys";
-    private const string compatTestResponseSignerMustBeSeed = "TestResponseSignerMustBeSeed";
-    private const string compatTestResponseSignerMustBeAccount = "TestResponseSignerMustBeAccount";
-    private const string compatRestResponseSignerIssuerMustBeAccount = "RestResponseSignerIssuerMustBeAccount";
-    private const string compatTestResponseSignerIssuerCouldBeSeed = "TestResponseSignerIssuerCouldBeSeed";
-    private const string compatTestResponseSignerIssuer = "TestResponseSignerIssuer";
-    private const string compatTestResponseSignerIssuerBadType = "TestResponseSignerIssuerBadType";
-    private const string compatTestEncryptKey = "TestEncryptKey";
-    private const string compatTestEncryptKeyMustBeSeed = "TestEncryptKeyMustBeSeed";
-    private const string compatTestSetupOK = "TestSetupOK";
-    private const string compatTestAbortRequest = "TestAbortRequest";
-    private const string compatTestBadGenerate = "TestBadGenerate";
-    private const string compatTestBadPermissions = "TestBadPermissions";
-    private const string compatTestBadEncryption = "TestBadEncryption";
-    private const string compatTestAsyncWorkers = "TestAsyncWorkers";
-    private const string compatTestErrorHandler = "TestErrorHandler";
-    private const string compatTestUserErrorHandler = "TestUserErrorHandler";
-
-    private const string BasicAccountEnv = "basic_account_env";
-    private const string BasicEncryptedEnv = "basic_encrypted_env";
-    private const string DelegatedEnv = "delegated_env";
-    private const string DelegatedKeysEnv = "delegated_keys_env";
-
     private const string SubjectServiceAll = ".test.service.>";
     private const string SubjectServiceStop = ".test.service.stop";
     private const string SubjectServiceSync = ".test.service.sync";
@@ -69,6 +43,20 @@ public class Testing
         _debug = GetDebugFlagValue();
         Log(1, $"Starting...");
         Log(3, $"Exe path {_exe}");
+    }
+
+    private static string SetCurrentDirectoryToProjectRoot()
+    {
+        var cwd = new DirectoryInfo(Directory.GetCurrentDirectory());
+
+        while (cwd!.GetFiles().All(f => f.Name != CompatRoot))
+        {
+            cwd = cwd.Parent;
+        }
+
+        Directory.SetCurrentDirectory(cwd.FullName);
+
+        return cwd.FullName;
     }
 
     void Log(int level, string message)
@@ -141,6 +129,20 @@ public class Testing
         return e;
     }
 
+    private static async Task InitializeAndStartNatsAuthServiceAndWait(T t, NatsAuthServiceOpts opts)
+    {
+        await using var service = new NatsAuthService(t.connection.CreateServicesContext(), opts);
+        await service.StartAsync(t.cts.Token);
+        await t.nt.RequestAsync<string>(t.Subject(SubjectDriverConnected), cancellationToken: t.cts.Token);
+        await t.tcs.Task;
+    }
+
+    private Func<Exception, CancellationToken, ValueTask> CreateAuthServiceErrorHandler(T t) => async (e, ct) =>
+    {
+        Log(1, $"Auth error: {e}");
+        await t.nt.PublishAsync(t.Subject(SubjectDriverError), e.Message, cancellationToken: ct);
+    };
+
     private void StartAuthServiceAndWaitForTests(string suitName, string natsCoordinationUrl)
     {
         string[] parts = suitName.Split('/');
@@ -157,7 +159,7 @@ public class Testing
             Log(1, $"Ping to test coordination server {natsCoordinationUrl}: {rttTest}");
             var cts = new CancellationTokenSource();
             var tcs = new TaskCompletionSource();
-            var testSub = Task.Run(async () =>
+            var serviceSub = Task.Run(async () =>
             {
                 await foreach (NatsMsg<string> m in nt.SubscribeAsync<string>(Subject(SubjectServiceAll),
                                    cancellationToken: cts.Token))
@@ -176,330 +178,179 @@ public class Testing
                 }
             }, cts.Token);
 
-            var jsonString = await nt.RequestAsync<string>(Subject(SubjectDriverVars), cancellationToken: cts.Token);
-            var json = JsonNode.Parse(jsonString.Data);
+            var jsonMsg = await nt.RequestAsync<string>(Subject(SubjectDriverVars), cancellationToken: cts.Token);
 
-            string url;
-            string username;
-            string password;
-            string token;
-            string audience;
-            string userInfoSubj;
-            KeyPair? akp = null;
-            KeyPair? ekp = null;
-            try
+            CompatVars cv = CompatVars.FromJson(suitName, jsonMsg.Data);
+
+            await using var connection = new NatsConnection(new()
             {
-                url = json!["nats_urls"]!.AsArray().First().GetValue<string>();
-                username = json["nats_opts"]!["user"]!.GetValue<string>();
-                password = json["nats_opts"]!["password"]!.GetValue<string>();
-                audience = json["audience"]!.GetValue<string>();
-                userInfoSubj = json["user_info_subj"]!.GetValue<string>();
-                token = json["nats_opts"]!["token"]!.GetValue<string>();
-                string accountSeed = json["account_key"]!["seed"]!.GetValue<string>();
-                string accountPk = json["account_key"]!["pk"]!.GetValue<string>();
-                if (!string.IsNullOrEmpty(accountSeed))
-                {
-                    akp = KeyPair.FromSeed(accountSeed);
-                    if (accountPk != akp.GetPublicKey())
-                    {
-                        throw new Exception("Invalid account key");
-                    }
-                }
-
-                string encryptionSeed = json["encryption_key"]!["seed"]!.GetValue<string>();
-                string encryptionPk = json["encryption_key"]!["pk"]!.GetValue<string>();
-                if (!string.IsNullOrEmpty(encryptionSeed))
-                {
-                    ekp = KeyPair.FromSeed(encryptionSeed);
-                    if (encryptionPk != ekp.GetPublicKey())
-                    {
-                        throw new Exception("Invalid encryption key");
-                    }
-                }
-            }
-            catch (Exception e)
-            {
-                Err($"Error parsing JSON: {e}");
-                return;
-            }
-
-            Log(3, $$"""
-                     VARS:
-                         name: {{name}}
-                         connecting to server: {{url}}
-                         username: {{username}}
-                         password: {{password}}
-                         token: {{token}}
-                         account seed: {{akp.GetSeed()}}
-                         account key: {{akp.GetPublicKey()}}
-                     """);
-
-            await using var connection = new NatsConnection(new NatsOpts
-            {
-                Url = url,
-                AuthOpts = new NatsAuthOpts { Username = username, Password = password, Token = token, },
+                Url = cv.Url,
+                AuthOpts = new NatsAuthOpts { Username = cv.Username, Password = cv.Password, Token = cv.Token, },
             });
             var rtt = await connection.PingAsync(cts.Token);
             Log(3, $"Connection RTT {rtt}");
 
-            var jwt = new NatsJwt();
+            Log(3, $"{cv}");
 
-            ValueTask<string> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
+            var t = new T
             {
-                if (name == compatTestSetupOK)
-                {
-                    Log(2, $"Auth user: {r.NatsConnectOptions.Username}");
-                    NatsUserClaims user = jwt.NewUserClaims(r.UserNKey);
-                    user.Audience = audience;
-                    user.User.Pub.Allow = [userInfoSubj];
-                    user.User.Sub.Allow = ["_INBOX.>"];
-                    user.Expires = DateTimeOffset.Now + TimeSpan.FromSeconds(90);
-                    return ValueTask.FromResult(jwt.EncodeUserClaims(user, akp));
-                }
+                suitName = suitName,
+                name = name,
+                cv = cv,
+                cts = cts,
+                tcs = tcs,
+                nt = nt,
+                connection = connection,
+                jwt = new NatsJwt(),
+            };
 
-                if (name == compatTestEncryptionMismatch)
-                {
-                    // checks at the handler should stop the request before it gets here
-                    throw new Exception("Unexpected callback");
-                }
-
-                throw new Exception($"Can't find Authorizer for name {name}");
+            MethodInfo? methodInfo = GetType().GetMethod(name);
+            if (methodInfo == null)
+            {
+                throw new Exception($"No test method found for '{name}'");
             }
 
-            ValueTask<string> ResponseSigner(NatsAuthorizationResponseClaims r, CancellationToken cancellationToken)
-            {
-                if (name == compatTestSetupOK)
-                {
-                    return ValueTask.FromResult(jwt.EncodeAuthorizationResponseClaims(r, akp));
-                }
+            Log(2, $"Calling test method '{name}'");
+            await (Task)methodInfo.Invoke(this, [t]);
 
-                if (name == compatTestEncryptionMismatch)
-                {
-                    // checks at the handler should stop the request before it gets here
-                    throw new Exception("Unexpected callback");
-                }
-
-                throw new Exception($"Can't find ResponseSigner for name {name}");
-            }
-
-            NatsAuthServiceOpts opts;
-            if (name == compatTestSetupOK)
-            {
-                opts = new NatsAuthServiceOpts(Authorizer, ResponseSigner)
-                {
-                    ErrorHandler = async (e, ct) =>
-                    {
-                        Log(1, $"Auth error: {e}");
-                        await nt.PublishAsync(Subject(SubjectDriverError), e.Message, cancellationToken: ct);
-                    },
-                    EncryptionKey = ekp,
-                };
-            }
-            else if (name == compatTestEncryptionMismatch)
-            {
-                opts = new NatsAuthServiceOpts(Authorizer, ResponseSigner)
-                {
-                    ErrorHandler = async (e, ct) =>
-                    {
-                        Log(1, $"Auth error: {e}");
-                        await nt.PublishAsync(Subject(SubjectDriverError), e.Message, cancellationToken: ct);
-                    },
-                    // do the opposite of the server setup so that when server is sending encrypted
-                    // data, the client is not able to decrypt it and vice versa.
-                    EncryptionKey = ekp == null ? KeyPair.CreatePair(PrefixByte.Curve) : null,
-                };
-            }
-            else
-            {
-                throw new Exception($"Can't find options for name {name}");
-            }
-
-            await using var service = new NatsAuthService(connection.CreateServicesContext(), opts);
-
-            await service.StartAsync(cts.Token);
-
-            await nt.RequestAsync<string>(Subject(SubjectDriverConnected), cancellationToken: cts.Token);
-
-            await tcs.Task;
-            await testSub;
+            await serviceSub;
         }).Wait();
 
         Log(2, "Service stopped");
     }
 
-    private static string SetCurrentDirectoryToProjectRoot()
+    public async Task TestEncryptionMismatch(T t)
     {
-        var cwd = new DirectoryInfo(Directory.GetCurrentDirectory());
-
-        while (cwd!.GetFiles().All(f => f.Name != CompatRoot))
+        ValueTask<string> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
         {
-            cwd = cwd.Parent;
+            throw new Exception("checks at the handler should stop the request before it gets here");
         }
 
-        Directory.SetCurrentDirectory(cwd.FullName);
+        ValueTask<string> ResponseSigner(NatsAuthorizationResponseClaims r, CancellationToken cancellationToken)
+        {
+            throw new Exception("checks at the handler should stop the request before it gets here");
+        }
 
-        return cwd.FullName;
+        NatsAuthServiceOpts opts = new(Authorizer, ResponseSigner)
+        {
+            ErrorHandler = CreateAuthServiceErrorHandler(t),
+
+            // do the opposite of the server setup so that when server is sending encrypted
+            // data, the client is not able to decrypt it and vice versa.
+            EncryptionKey = t.cv.Ekp == null ? KeyPair.CreatePair(PrefixByte.Curve) : null,
+        };
+
+        await InitializeAndStartNatsAuthServiceAndWait(t, opts);
+    }
+
+    public async Task TestSetupOK(T t)
+    {
+        ValueTask<string> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
+        {
+            Log(2, $"Auth user: {r.NatsConnectOptions.Username}");
+            NatsUserClaims user = t.jwt.NewUserClaims(r.UserNKey);
+            user.Audience = t.cv.Audience;
+            user.User.Pub.Allow = [t.cv.UserInfoSubj];
+            user.User.Sub.Allow = ["_INBOX.>"];
+            user.Expires = DateTimeOffset.Now + TimeSpan.FromSeconds(90);
+            return ValueTask.FromResult(t.jwt.EncodeUserClaims(user, t.cv.Akp));
+        }
+
+        ValueTask<string> ResponseSigner(NatsAuthorizationResponseClaims r, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(t.jwt.EncodeAuthorizationResponseClaims(r, t.cv.Akp));
+        }
+
+        NatsAuthServiceOpts opts = new(Authorizer, ResponseSigner)
+        {
+            ErrorHandler = CreateAuthServiceErrorHandler(t),
+            EncryptionKey = t.cv.Ekp,
+        };
+
+        await InitializeAndStartNatsAuthServiceAndWait(t, opts);
     }
 }
 
-// Borrowed from https://stackoverflow.com/questions/3342941/kill-child-process-when-parent-process-is-killed/37034966#37034966
-
-/// <summary>
-/// Allows processes to be automatically killed if this parent process unexpectedly quits.
-/// This feature requires Windows 8 or greater. On Windows 7, nothing is done.</summary>
-/// <remarks>References:
-///  https://stackoverflow.com/a/4657392/386091
-///  https://stackoverflow.com/a/9164742/386091. </remarks>
-#pragma warning disable SA1204
-#pragma warning disable SA1129
-#pragma warning disable SA1201
-#pragma warning disable SA1117
-#pragma warning disable SA1400
-#pragma warning disable SA1311
-#pragma warning disable SA1308
-#pragma warning disable SA1413
-#pragma warning disable SA1121
-public static class ChildProcessTracker
+public record T
 {
-    /// <summary>
-    /// Add the process to be tracked. If our current process is killed, the child processes
-    /// that we are tracking will be automatically killed, too. If the child process terminates
-    /// first, that's fine, too.</summary>
-    /// <param name="process"></param>
-    public static void AddProcess(Process process)
+    public CompatVars cv { get; init; }
+    public CancellationTokenSource cts { get; init; }
+    public TaskCompletionSource tcs { get; init; }
+    public NatsConnection nt { get; init; }
+    public NatsConnection connection { get; init; }
+    public string name { get; init; }
+    public string suitName { get; init; }
+    public NatsJwt jwt { get; set; }
+
+    public string Subject(string suffix)
     {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        return suitName + suffix;
+    }
+}
+
+public record CompatVars
+{
+    public string SuitName { get; init; }
+    public string Name { get; init; }
+    public string Env { get; init; }
+    public string Url { get; init; }
+    public string Username { get; init; }
+    public string Password { get; init; }
+    public string Token { get; init; }
+    public string Audience { get; init; }
+    public string UserInfoSubj { get; init; }
+    public KeyPair? Akp { get; init; }
+    public KeyPair? Ekp { get; init; }
+
+    public static CompatVars FromJson(string suitName, string jsonString)
+    {
+        string[] parts = suitName.Split('/');
+        string env = parts[0];
+        string name = parts[1];
+
+        var json = JsonNode.Parse(jsonString);
+        if (json == null)
         {
-            return;
+            throw new Exception("Failed to parse JSON");
         }
 
-        if (s_jobHandle != IntPtr.Zero)
+        KeyPair? akp = null;
+        string accountSeed = json["account_key"]!["seed"]!.GetValue<string>();
+        string accountPk = json["account_key"]!["pk"]!.GetValue<string>();
+        if (!string.IsNullOrEmpty(accountSeed))
         {
-            var success = AssignProcessToJobObject(s_jobHandle, process.Handle);
-            if (!success && !process.HasExited)
+            akp = KeyPair.FromSeed(accountSeed);
+            if (accountPk != akp.GetPublicKey())
             {
-                throw new Win32Exception();
+                throw new Exception("Invalid account key");
             }
         }
-    }
 
-    [RequiresDynamicCode("Calls System.Runtime.InteropServices.Marshal.SizeOf(Type)")]
-    static ChildProcessTracker()
-    {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        KeyPair? ekp = null;
+        string encryptionSeed = json["encryption_key"]!["seed"]!.GetValue<string>();
+        string encryptionPk = json["encryption_key"]!["pk"]!.GetValue<string>();
+        if (!string.IsNullOrEmpty(encryptionSeed))
         {
-            return;
-        }
-
-        // This feature requires Windows 8 or later. To support Windows 7, requires
-        //  registry settings to be added if you are using Visual Studio plus an
-        //  app.manifest change.
-        //  https://stackoverflow.com/a/4232259/386091
-        //  https://stackoverflow.com/a/9507862/386091
-        if (Environment.OSVersion.Version < new Version(6, 2))
-        {
-            return;
-        }
-
-        // The job name is optional (and can be null), but it helps with diagnostics.
-        //  If it's not null, it has to be unique. Use SysInternals' Handle command-line
-        //  utility: handle -a ChildProcessTracker
-        var jobName = "ChildProcessTracker" + Process.GetCurrentProcess().Id;
-        s_jobHandle = CreateJobObject(IntPtr.Zero, jobName);
-
-        var info = new JOBOBJECT_BASIC_LIMIT_INFORMATION();
-
-        // This is the key flag. When our process is killed, Windows will automatically
-        //  close the job handle, and when that happens, we want the child processes to
-        //  be killed, too.
-        info.LimitFlags = JOBOBJECTLIMIT.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-
-        var extendedInfo = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
-        extendedInfo.BasicLimitInformation = info;
-
-        var length = Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
-        var extendedInfoPtr = Marshal.AllocHGlobal(length);
-        try
-        {
-            Marshal.StructureToPtr(extendedInfo, extendedInfoPtr, false);
-
-            if (!SetInformationJobObject(s_jobHandle, JobObjectInfoType.ExtendedLimitInformation,
-                    extendedInfoPtr, (uint)length))
+            ekp = KeyPair.FromSeed(encryptionSeed);
+            if (encryptionPk != ekp.GetPublicKey())
             {
-                throw new Win32Exception();
+                throw new Exception("Invalid encryption key");
             }
         }
-        finally
+
+        return new CompatVars
         {
-            Marshal.FreeHGlobal(extendedInfoPtr);
-        }
+            SuitName = suitName,
+            Name = name,
+            Env = env,
+            Url = json!["nats_urls"]!.AsArray().First().GetValue<string>(),
+            Username = json["nats_opts"]!["user"]!.GetValue<string>(),
+            Password = json["nats_opts"]!["password"]!.GetValue<string>(),
+            Token = json["nats_opts"]!["token"]!.GetValue<string>(),
+            Audience = json["audience"]!.GetValue<string>(),
+            UserInfoSubj = json["user_info_subj"]!.GetValue<string>(),
+            Akp = akp,
+            Ekp = ekp,
+        };
     }
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
-    static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string name);
-
-    [DllImport("kernel32.dll")]
-    static extern bool SetInformationJobObject(IntPtr job, JobObjectInfoType infoType,
-        IntPtr lpJobObjectInfo, uint cbJobObjectInfoLength);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
-
-    // Windows will automatically close any open job handles when our process terminates.
-    //  This can be verified by using SysInternals' Handle utility. When the job handle
-    //  is closed, the child processes will be killed.
-    private static readonly IntPtr s_jobHandle;
-}
-
-public enum JobObjectInfoType
-{
-    AssociateCompletionPortInformation = 7,
-    BasicLimitInformation = 2,
-    BasicUIRestrictions = 4,
-    EndOfJobTimeInformation = 6,
-    ExtendedLimitInformation = 9,
-    SecurityLimitInformation = 5,
-    GroupInformation = 11
-}
-
-[StructLayout(LayoutKind.Sequential)]
-public struct JOBOBJECT_BASIC_LIMIT_INFORMATION
-{
-    public long PerProcessUserTimeLimit;
-    public long PerJobUserTimeLimit;
-    public JOBOBJECTLIMIT LimitFlags;
-    public UIntPtr MinimumWorkingSetSize;
-    public UIntPtr MaximumWorkingSetSize;
-    public uint ActiveProcessLimit;
-    public long Affinity;
-    public uint PriorityClass;
-    public uint SchedulingClass;
-}
-
-[Flags]
-public enum JOBOBJECTLIMIT : uint
-{
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
-}
-
-[StructLayout(LayoutKind.Sequential)]
-public struct IO_COUNTERS
-{
-    public ulong ReadOperationCount;
-    public ulong WriteOperationCount;
-    public ulong OtherOperationCount;
-    public ulong ReadTransferCount;
-    public ulong WriteTransferCount;
-    public ulong OtherTransferCount;
-}
-
-[StructLayout(LayoutKind.Sequential)]
-public struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION
-{
-    public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
-    public IO_COUNTERS IoInfo;
-    public UIntPtr ProcessMemoryLimit;
-    public UIntPtr JobMemoryLimit;
-    public UIntPtr PeakProcessMemoryUsed;
-    public UIntPtr PeakJobMemoryUsed;
 }

@@ -28,6 +28,7 @@
 using Compat;
 
 // var store = new NscStore("C:\\Users\\mtmk\\.local\\share\\nats\\nsc");
+// var store = new NscStore("D:\\tmp\\asd\\callout_test4152748871\\nsc");
 // foreach (NscOperator op in store.LoadOperators())
 // {
 //     Console.WriteLine(op);

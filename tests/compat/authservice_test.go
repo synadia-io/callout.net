@@ -37,6 +37,8 @@ type CalloutEnv interface {
     //ServiceOpts() []Option
     UserOpts() []nats.Option
     GetAccounts() map[string]nkeys.KeyPair
+    ServiceCreds() string
+    SentinelCreds() string
 }
 
 // Option is a function type used to configure the AuthorizationService options
@@ -113,15 +115,15 @@ func TestBasicEncryptedEnv(t *testing.T) {
 }
 
 func TestDelegatedEnv(t *testing.T) {
-    //cs := NewCalloutSuite(t)
-    //cs.env = NewDelegatedEnv(t, cs.dir)
-    //suite.Run(t, cs)
+    cs := NewCalloutSuite(t)
+    cs.env = NewDelegatedEnv(t, cs.dir)
+    suite.Run(t, cs)
 }
 
 func TestDelegatedKeysEnv(t *testing.T) {
-    //cs := NewCalloutSuite(t)
-    //cs.env = NewDelegatedKeysEnv(t, cs.dir)
-    //suite.Run(t, cs)
+    cs := NewCalloutSuite(t)
+    cs.env = NewDelegatedKeysEnv(t, cs.dir)
+    suite.Run(t, cs)
 }
 
 func (s *CalloutSuite) TestEncryptionMismatch() {

@@ -88,6 +88,8 @@ type CompatVars struct {
 	AccountKeys     map[string]CompatKey `json:"account_keys"`
 	Dir             string               `json:"dir"`
 	NscDir          string               `json:"nsc_dir"`
+	ServiceCreds    string               `json:"service_creds"`
+	SentinelCreds   string               `json:"sentinel_creds"`
 }
 
 type NATSOptions struct {
@@ -301,6 +303,8 @@ func createVars(suitName string, s *CalloutSuite) *CompatVars {
 		AccountKeys:     compatKeyMap,
 		Dir:             s.dir.Dir,
 		NscDir:          filepath.Join(s.dir.Dir, "nsc"),
+		ServiceCreds:    s.env.ServiceCreds(),
+		SentinelCreds:   s.env.SentinelCreds(),
 	}
 }
 

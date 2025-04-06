@@ -202,3 +202,11 @@ func (bc *DelegatedKeysEnv) GetAccounts() map[string]nkeys.KeyPair {
 		"A": bc.keys[bc.userSigner].Pair,
 	}
 }
+
+func (bc *DelegatedKeysEnv) ServiceCreds() string {
+	return bc.serviceCreds
+}
+
+func (bc *DelegatedKeysEnv) SentinelCreds() string {
+	return bc.sentinelCreds
+}

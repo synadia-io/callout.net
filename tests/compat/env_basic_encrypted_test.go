@@ -95,3 +95,11 @@ func (bc *BasicEncryptedEnv) GetAccounts() map[string]nkeys.KeyPair {
 		"A": bc.akp,
 	}
 }
+
+func (bc *BasicEncryptedEnv) ServiceCreds() string {
+	return ""
+}
+
+func (bc *BasicEncryptedEnv) SentinelCreds() string {
+	return ""
+}

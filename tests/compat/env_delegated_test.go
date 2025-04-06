@@ -153,14 +153,6 @@ func (bc *DelegatedEnv) ServiceAudience() string {
 	return c.Subject()
 }
 
-//func (bc *DelegatedEnv) ServiceOpts() []Option {
-//	c := bc.GetAccount("C")
-//	responseSignerFn := func(claims *jwt.AuthorizationResponseClaims) (string, error) {
-//		return c.IssueAuthorizationResponse(claims, bc.cSigningKey)
-//	}
-//	return []Option{ResponseSigner(responseSignerFn)}
-//}
-
 func (bc *DelegatedEnv) GetAccounts() map[string]nkeys.KeyPair {
 	return map[string]nkeys.KeyPair{
 		//"A": bc.keys[bc.userSigner].Pair,

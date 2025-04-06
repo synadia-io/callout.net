@@ -52,12 +52,17 @@ public record CompatVars
     public string Url { get; init; }
     public string Username { get; init; }
     public string Password { get; init; }
-    public string Token { get; init; }
     public string Audience { get; init; }
     public string UserInfoSubj { get; init; }
 
     public Dictionary<string, KeyPair> AccountKeys { get; init; }
     public KeyPair? Ekp { get; init; }
+
+    public string ServiceCreds { get; init; }
+
+    public string NscDir { get; init; }
+
+    public string Dir { get; init; }
 
     public static CompatVars FromJson(string suitName, string jsonString)
     {
@@ -106,28 +111,18 @@ public record CompatVars
             SuitName = suitName,
             Name = name,
             Env = env,
-            Url = json!["nats_urls"]!.AsArray().First().GetValue<string>(),
+            Url = json["nats_opts"]!["urls"]!.AsArray().First().GetValue<string>(),
             Username = json["nats_opts"]!["user"]!.GetValue<string>(),
             Password = json["nats_opts"]!["password"]!.GetValue<string>(),
-            Token = json["nats_opts"]!["token"]!.GetValue<string>(),
             Audience = json["audience"]!.GetValue<string>(),
             UserInfoSubj = json["user_info_subj"]!.GetValue<string>(),
             Dir = json["dir"]!.GetValue<string>(),
             NscDir = json["nsc_dir"]!.GetValue<string>(),
             ServiceCreds = json["service_creds"]!.GetValue<string>(),
-            SentinelCreds = json["sentinel_creds"]!.GetValue<string>(),
             Ekp = ekp,
             AccountKeys = keys,
         };
     }
-
-    public string SentinelCreds { get; init; }
-
-    public string ServiceCreds { get; init; }
-
-    public string NscDir { get; init; }
-
-    public string Dir { get; init; }
 }
 
 public interface IClaimsEncoder

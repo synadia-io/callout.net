@@ -83,13 +83,6 @@ func (bc *BasicEncryptedEnv) ServiceAudience() string {
 	return "$G"
 }
 
-//func (bc *BasicEncryptedEnv) ServiceOpts() []Option {
-//	return []Option{
-//		ResponseSignerKey(bc.akp),
-//		EncryptionKey(bc.xkey),
-//	}
-//}
-
 func (bc *BasicEncryptedEnv) GetAccounts() map[string]nkeys.KeyPair {
 	return map[string]nkeys.KeyPair{
 		"A": bc.akp,
@@ -97,9 +90,5 @@ func (bc *BasicEncryptedEnv) GetAccounts() map[string]nkeys.KeyPair {
 }
 
 func (bc *BasicEncryptedEnv) ServiceCreds() string {
-	return ""
-}
-
-func (bc *BasicEncryptedEnv) SentinelCreds() string {
 	return ""
 }

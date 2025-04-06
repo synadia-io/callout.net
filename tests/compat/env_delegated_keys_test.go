@@ -189,14 +189,6 @@ func (bc *DelegatedKeysEnv) ServiceAudience() string {
 	return c.Subject()
 }
 
-//func (bc *DelegatedKeysEnv) ServiceOpts() []Option {
-//	c := bc.GetAccount("C")
-//	skp, ok := bc.keys[bc.authorizationSigner]
-//	require.True(bc.t, ok)
-//
-//	return []Option{ResponseSignerKey(skp.Pair), ResponseSignerIssuer(c.Subject())}
-//}
-
 func (bc *DelegatedKeysEnv) GetAccounts() map[string]nkeys.KeyPair {
 	return map[string]nkeys.KeyPair{
 		"A": bc.keys[bc.userSigner].Pair,
@@ -205,8 +197,4 @@ func (bc *DelegatedKeysEnv) GetAccounts() map[string]nkeys.KeyPair {
 
 func (bc *DelegatedKeysEnv) ServiceCreds() string {
 	return bc.serviceCreds
-}
-
-func (bc *DelegatedKeysEnv) SentinelCreds() string {
-	return bc.sentinelCreds
 }

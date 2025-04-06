@@ -97,7 +97,13 @@ public class Testing
     {
         Log(3, $"Args: {string.Join(" ", _args)}");
 
-        if (_args.Length > 0 && _args[0] == "-r")
+        if (_args.Length == 0)
+        {
+            var go = new Go(_cwd, _exe);
+            int e = go.Test();
+            return e;
+        }
+        else if (_args.Length > 0 && _args[0] == "-r")
         {
             Log(1, "Running tests...");
             if (_args.Length > 2)
@@ -124,13 +130,17 @@ public class Testing
                 return 1;
             }
         }
-
-        var go = new Go(_cwd, _exe);
-        int e = go.Test();
-
-        Log(1, "Bye!");
-
-        return e;
+        else
+        {
+            Err("""
+                Usage:
+                Run tests: (starts Go test)
+                  compat
+                Run tests with auth service: (called from Go test)
+                  compat -r <suitName> <natsCoordinationUrl>
+                """);
+            return 1;
+        }
     }
 
     private static async Task InitializeAndStartAuthServiceAndWait(TestContext t, NatsAuthServiceOpts opts)

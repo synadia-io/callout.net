@@ -1,16 +1,16 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-    <PropertyGroup>
-        <TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
-        <LangVersion>latest</LangVersion>
-        <IsPackable>true</IsPackable>
-    </PropertyGroup>
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
 
-    <ItemGroup>
-      <PackageReference Include="NATS.Client.Services" Version="2.5.12" />
-      <PackageReference Include="NATS.Jwt" Version="1.0.0-preview.12" />
-    </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="NATS.Client.Services" Version="2.5.12"/>
+    <PackageReference Include="NATS.Jwt" Version="1.0.0-preview.12"/>
+  </ItemGroup>
 
 </Project>

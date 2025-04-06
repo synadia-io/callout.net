@@ -34,7 +34,7 @@ type CalloutEnv interface {
     EncryptionKey() nkeys.KeyPair
     Audience() string
     EncodeUser(account string, claim jwt.Claims) (string, error)
-    ServiceOpts() []Option
+    //ServiceOpts() []Option
     UserOpts() []nats.Option
     AccountKey() nkeys.KeyPair
 }
@@ -74,7 +74,6 @@ func (s *CalloutSuite) SetupServer(conf []byte) nst.NatsServer {
 }
 
 func (s *CalloutSuite) SetupSuite() {
-    //println(">>> SETUP SUITE", string(s.env.GetServerConf()))
     s.ns = s.SetupServer(s.env.GetServerConf())
     s.ns2 = nst.NewNatsServer(s.dir2, nil)
 }
@@ -101,8 +100,32 @@ func TestBasicEnv(t *testing.T) {
     suite.Run(t, cs)
 }
 
+func TestBasicAccountEnv(t *testing.T) {
+    cs := NewCalloutSuite(t)
+    cs.env = NewBasicAccountEnv(t, cs.dir)
+    suite.Run(t, cs)
+}
+
+func TestBasicEncryptedEnv(t *testing.T) {
+    cs := NewCalloutSuite(t)
+    cs.env = NewBasicEncryptedEnv(t, cs.dir)
+    suite.Run(t, cs)
+}
+
+func (s *CalloutSuite) TestEncryptionMismatch() {
+    es := StartExternalAuthService(s)
+    defer es.Stop()
+
+    // this should timeout, but shown as Authorization Violation because the service is NOT running due to the mismatch
+    _, err := s.userConn(nats.MaxReconnects(1))
+    s.Error(err)
+    lastErr := es.GetLastError()
+    s.Contains(lastErr, "encryption mismatch")
+}
+
 func (s *CalloutSuite) TestSetupOK() {
-    es := StartExternalAuthService(setupOK, s)
+    es := StartExternalAuthService(s)
+    defer es.Stop()
 
     c, err := s.userConn(nats.UserInfo("hello", "world"))
     s.NoError(err)
@@ -110,6 +133,4 @@ func (s *CalloutSuite) TestSetupOK() {
     info := nst.ClientInfo(s.T(), c)
     s.Contains(info.Data.Permissions.Pub.Allow, nst.UserInfoSubj)
     s.Contains(info.Data.Permissions.Sub.Allow, "_INBOX.>")
-
-    es.Wait()
 }

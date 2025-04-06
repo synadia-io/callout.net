@@ -49,27 +49,22 @@ public class NatsAuthService : INatsAuthService
                 try
                 {
                     byte[] token = await ProcessRequestAsync(msg, cancellationToken);
-                    if (token.Length == 0)
-                    {
-                        return;
-                    }
-
                     await msg.ReplyAsync(token, cancellationToken: cancellationToken);
+                }
+                catch (NatsAuthServiceAuthException e)
+                {
+                    _logger.LogInformation(e, "Auth error");
+                    await CallErrorHandlerAsync(e, cancellationToken);
+                }
+                catch (NatsAuthServiceException e)
+                {
+                    _logger.LogWarning(e, "Service error");
+                    await CallErrorHandlerAsync(e, cancellationToken);
                 }
                 catch (Exception e)
                 {
-                    _logger.LogError(e, "Auth error");
-                    if (_opts.ErrorHandler is { } errorHandler)
-                    {
-                        try
-                        {
-                            await errorHandler(e, cancellationToken);
-                        }
-                        catch (Exception e2)
-                        {
-                            _logger.LogError(e2, "Auth error handler");
-                        }
-                    }
+                    _logger.LogError(e, "Generic error");
+                    await CallErrorHandlerAsync(e, cancellationToken);
                 }
             },
             name: "auth-request-handler",
@@ -91,20 +86,7 @@ public class NatsAuthService : INatsAuthService
 
         if (user == string.Empty)
         {
-            _logger.LogWarning("Error authorizing: authorizer didn't generate a JWT: {User}", req.UserNKey);
-            if (_opts.ErrorHandler is { } errorHandler)
-            {
-                try
-                {
-                    await errorHandler(new NatsAuthServiceAuthException("Error authorizing: authorizer didn't generate a JWT", req.UserNKey), cancellationToken);
-                }
-                catch (Exception e2)
-                {
-                    _logger.LogError(e2, "Auth error handler");
-                }
-            }
-
-            return [];
+            throw new NatsAuthServiceAuthException("Error authorizing: authorizer didn't generate a JWT");
         }
 
         res.AuthorizationResponse.Jwt = user;
@@ -134,6 +116,21 @@ public class NatsAuthService : INatsAuthService
         }
     }
 
+    private async Task CallErrorHandlerAsync(Exception exception, CancellationToken cancellationToken)
+    {
+        if (_opts.ErrorHandler is { } errorHandler)
+        {
+            try
+            {
+                await errorHandler(exception, cancellationToken);
+            }
+            catch (Exception e)
+            {
+                _logger.LogError(e, "Auth error handler");
+            }
+        }
+    }
+
     private (bool IsEncrypted, NatsAuthorizationRequest Request) DecodeJwt(NatsSvcMsg<byte[]> msg)
     {
         byte[] data = msg.Data!;
@@ -145,20 +142,26 @@ public class NatsAuthService : INatsAuthService
         }
 
         bool isEncrypted = !jwt.StartsWith("eyJ0");
+
+        if (isEncrypted && _opts.EncryptionKey == null)
+        {
+            throw new NatsAuthServiceException("Bad request: encryption mismatch: payload is encrypted");
+        }
+
+        if (!isEncrypted && _opts.EncryptionKey != null)
+        {
+            throw new NatsAuthServiceException("Bad request: encryption mismatch: payload is not encrypted");
+        }
+
         if (isEncrypted)
         {
-            if (_opts.EncryptionKey == null)
-            {
-                throw new NatsAuthServiceException("No encryption key found");
-            }
-
             if (msg.Headers == null)
             {
                 throw new NatsAuthServiceException("No encryption headers found");
             }
 
             var serverKey = msg.Headers[NatsServerXKeyHeader];
-            byte[] open = _opts.EncryptionKey.Open(data, serverKey);
+            byte[] open = _opts.EncryptionKey!.Open(data, serverKey);
             jwt = Encoding.ASCII.GetString(open);
         }
 
@@ -166,17 +169,17 @@ public class NatsAuthService : INatsAuthService
 
         if (!arc.Issuer.StartsWith("N"))
         {
-            throw new NatsAuthServiceException($"bad request: expected server: {arc.Issuer}");
+            throw new NatsAuthServiceException($"Bad request: expected server: {arc.Issuer}");
         }
 
         if (arc.Issuer != arc.AuthorizationRequest.NatsServer.Id)
         {
-            throw new NatsAuthServiceException($"bad request: issuers don't match: {arc.Issuer} != {arc.AuthorizationRequest.NatsServer.Id}");
+            throw new NatsAuthServiceException($"Bad request: issuers don't match: {arc.Issuer} != {arc.AuthorizationRequest.NatsServer.Id}");
         }
 
         if (arc.Audience != ExpectedAudience)
         {
-            throw new NatsAuthServiceException($"bad request: unexpected audience: {arc.Audience}");
+            throw new NatsAuthServiceException($"Bad request: unexpected audience: {arc.Audience}");
         }
 
         return (isEncrypted, arc.AuthorizationRequest);

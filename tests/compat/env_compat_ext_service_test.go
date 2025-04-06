@@ -16,27 +16,23 @@ import (
 	"time"
 )
 
-const setupOK = "setup_ok"
-const basicAccountEnv = "basic_account_env"
-const basicEncryptedEnv = "basic_encrypted_env"
-const delegatedEnv = "delegated_env"
-const delegatedKeysEnv = "delegated_keys_env"
-
-const subjectDriverAll = "test.driver.>"
-const subjectServiceStop = "test.service.stop"
-const subjectDriverConnected = "test.driver.connected"
-const subjectDriverError = "test.driver.error"
-const subjectDriverVars = "test.driver.vars"
+const subjectDriverAll = ".test.driver.>"
+const subjectServiceStop = ".test.service.stop"
+const subjectServiceSync = ".test.service.sync"
+const subjectDriverConnected = ".test.driver.connected"
+const subjectDriverSync = ".test.driver.sync"
+const subjectDriverError = ".test.driver.error"
+const subjectDriverVars = ".test.driver.vars"
 
 type ExtService struct {
-	name            string
-	t               *testing.T
-	s               *CalloutSuite
-	cv              *CompatVars
-	cmd             *exec.Cmd
-	nc2             *nats.Conn
-	mu              sync.Mutex
-	lastErrorString string
+	name   string
+	t      *testing.T
+	s      *CalloutSuite
+	cv     *CompatVars
+	cmd    *exec.Cmd
+	nc2    *nats.Conn
+	mu     sync.Mutex
+	errors []string
 }
 
 type callbackFn string
@@ -80,13 +76,15 @@ type CompatKey struct {
 }
 
 type CompatVars struct {
-	Name         string      `json:"name"`
-	NatsUrls     []string    `json:"nats_urls"`
-	NatsOpts     NATSOptions `json:"nats_opts"`
-	Audience     string      `json:"audience"`
-	UserInfoSubj string      `json:"user_info_subj"`
-	AccountKey   CompatKey   `json:"account_key"`
-	NatsTestUrls []string    `json:"nats_test_urls"`
+	Name            string      `json:"name"`
+	NatsUrls        []string    `json:"nats_urls"`
+	NatsOpts        NATSOptions `json:"nats_opts"`
+	Audience        string      `json:"audience"`
+	ServiceAudience string      `json:"service_audience"`
+	UserInfoSubj    string      `json:"user_info_subj"`
+	AccountKey      CompatKey   `json:"account_key"`
+	EncryptionKey   CompatKey   `json:"encryption_key"`
+	NatsTestUrls    []string    `json:"nats_test_urls"`
 }
 
 type NATSOptions struct {
@@ -109,8 +107,10 @@ type NATSOptions struct {
 	Token            string        `json:"token"`
 }
 
-func StartExternalAuthService(name string, s *CalloutSuite) *ExtService {
-	cv := createVars(name, s)
+func StartExternalAuthService(s *CalloutSuite) *ExtService {
+	suitName := s.T().Name()
+	logMessage(1, "Starting external auth service for "+suitName+" ...")
+	cv := createVars(suitName, s)
 
 	nc2, err := s.ns2.MaybeConnect()
 	if err != nil {
@@ -118,31 +118,34 @@ func StartExternalAuthService(name string, s *CalloutSuite) *ExtService {
 	}
 
 	es := &ExtService{
-		name:            name,
-		t:               s.T(),
-		s:               s,
-		cv:              cv,
-		nc2:             nc2,
-		lastErrorString: "",
+		name:   suitName,
+		t:      s.T(),
+		s:      s,
+		cv:     cv,
+		nc2:    nc2,
+		errors: []string{},
 	}
 
 	waitConnected := make(chan struct{})
 	timeout := time.NewTimer(5 * time.Second) // Set timeout duration as appropriate
 	defer timeout.Stop()
 
-	subscribe, err := nc2.Subscribe(subjectDriverAll, func(m *nats.Msg) {
+	subscribe, err := nc2.Subscribe(suitName+subjectDriverAll, func(m *nats.Msg) {
 		logMessage(2, "received message: "+string(m.Data))
 
-		if m.Subject == subjectDriverConnected {
+		if m.Subject == suitName+subjectDriverSync {
+			err := m.Respond([]byte("ok"))
+			if err != nil {
+				logMessage(0, fmt.Sprintf("error in sync response: %v", err))
+			}
+		} else if m.Subject == suitName+subjectDriverConnected {
 			logMessage(1, "Connected")
 			close(waitConnected) // Signal completion
 			err := m.Respond([]byte("ok"))
 			if err != nil {
-				logMessage(0, fmt.Sprintf("error in test.connected response: %v", err))
+				logMessage(0, fmt.Sprintf("error in connected response: %v", err))
 			}
-		}
-
-		if m.Subject == subjectDriverVars {
+		} else if m.Subject == suitName+subjectDriverVars {
 			var buf bytes.Buffer
 			if err := json.NewEncoder(&buf).Encode(cv); err != nil {
 				s.T().Fatalf("failed to encode CompatVars to JSON: %v", err)
@@ -150,24 +153,23 @@ func StartExternalAuthService(name string, s *CalloutSuite) *ExtService {
 			//encoded := base64.StdEncoding.EncodeToString(buf.Bytes())
 			err := m.Respond(buf.Bytes())
 			if err != nil {
-				logMessage(0, fmt.Sprintf("error in test.vars response: %v", err))
+				logMessage(0, fmt.Sprintf("error in vars response: %v", err))
 			}
-		}
-
-		if m.Subject == subjectDriverError {
+		} else if m.Subject == suitName+subjectDriverError {
 			errorMessage := string(m.Data)
-			logMessage(1, fmt.Sprintf("error service: %s", errorMessage))
+			logMessage(1, fmt.Sprintf("error from service: %s", errorMessage))
 
 			es.mu.Lock()
 			defer es.mu.Unlock()
-			es.lastErrorString = errorMessage // Set the string variable in a thread-safe manner
+			es.errors = append(es.errors, errorMessage)
+		} else {
+			logMessage(0, fmt.Sprintf("unknown subject: %s", m.Subject))
 		}
-
 	})
 	if err != nil {
 		s.T().Fatalf("error in test coordination sub: %v", err)
 	}
-	logMessage(1, "subscribed to tes:t"+subscribe.Subject)
+	logMessage(1, "subscribed to test: "+subscribe.Subject)
 
 	compatExe := os.Getenv("X_COMPAT_EXE")
 	if compatExe == "" {
@@ -178,7 +180,7 @@ func StartExternalAuthService(name string, s *CalloutSuite) *ExtService {
 	natsTestUrl := s.ns2.NatsURLs()[0]
 	logMessage(2, "natsTestUrl: "+natsTestUrl)
 
-	cmd := exec.Command(compatExe, "-r", natsTestUrl) // Replace with your process
+	cmd := exec.Command(compatExe, "-r", suitName, natsTestUrl) // Replace with your process
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -199,18 +201,32 @@ func StartExternalAuthService(name string, s *CalloutSuite) *ExtService {
 	return es
 }
 
-func (es *ExtService) Start() {
-	es.t.Fatal("not implemented")
-}
-
-func (es *ExtService) GetLastErrorString() string {
+func (es *ExtService) GetLastError() string {
+	_, _ = es.nc2.Request(es.name+subjectServiceSync, []byte("sync"), 5*time.Second)
 	es.mu.Lock()
 	defer es.mu.Unlock()
-	return es.lastErrorString
+	if len(es.errors) == 0 {
+		logMessage(3, "Get last error: N/A")
+		return ""
+	}
+	lastError := es.errors[len(es.errors)-1]
+	logMessage(2, fmt.Sprintf("Get last error: '%s'", lastError))
+	return lastError
 }
 
-func (es *ExtService) Wait() {
-	_, _ = es.nc2.Request(subjectServiceStop, []byte("stop"), 5*time.Second)
+func (es *ExtService) GetErrors() []string {
+	_, _ = es.nc2.Request(es.name+subjectServiceSync, []byte("sync"), 5*time.Second)
+	es.mu.Lock()
+	defer es.mu.Unlock()
+
+	// Return a copy of the errors slice to ensure immutability
+	errorsCopy := make([]string, len(es.errors))
+	copy(errorsCopy, es.errors)
+	return errorsCopy
+}
+
+func (es *ExtService) Stop() {
+	_, _ = es.nc2.Request(es.name+subjectServiceStop, []byte("stop"), 5*time.Second)
 
 	// Create a channel to signal when the process exits
 	done := make(chan error, 1)
@@ -264,28 +280,46 @@ func createVars(name string, s *CalloutSuite) *CompatVars {
 		Token:            opts1.Token,
 	}
 
-	seed, err := s.env.AccountKey().Seed()
-	if err != nil {
-		s.T().Fatalf("failed to get account seed: %v", err)
-	}
-
-	pk, err := s.env.AccountKey().PublicKey()
-	if err != nil {
-		s.T().Fatalf("failed to get account pk: %v", err)
-	}
-
 	return &CompatVars{
-		Name:         name,
-		NatsTestUrls: s.ns2.NatsURLs(),
-		NatsUrls:     s.ns.NatsURLs(),
-		NatsOpts:     opts2,
-		Audience:     s.env.Audience(),
-		UserInfoSubj: nst.UserInfoSubj,
-		AccountKey: CompatKey{
-			Seed: string(seed),
-			Pk:   pk,
-		},
+		Name:            name,
+		NatsTestUrls:    s.ns2.NatsURLs(),
+		NatsUrls:        s.ns.NatsURLs(),
+		NatsOpts:        opts2,
+		Audience:        s.env.Audience(),
+		ServiceAudience: s.env.ServiceAudience(),
+		UserInfoSubj:    nst.UserInfoSubj,
+		AccountKey:      getCompatKey(s.env.AccountKey()),
+		EncryptionKey:   getCompatKey(s.env.EncryptionKey()),
 	}
+}
+
+func getCompatKey(kp nkeys.KeyPair) CompatKey {
+	return CompatKey{
+		Seed: getSeed(kp),
+		Pk:   getPK(kp),
+	}
+}
+
+func getPK(kp nkeys.KeyPair) string {
+	if kp == nil {
+		return ""
+	}
+	pk, err := kp.PublicKey()
+	if err != nil {
+		return ""
+	}
+	return pk
+}
+
+func getSeed(kp nkeys.KeyPair) string {
+	if kp == nil {
+		return ""
+	}
+	seed, err := kp.Seed()
+	if err != nil {
+		return ""
+	}
+	return string(seed)
 }
 
 var globalDebugLevel int

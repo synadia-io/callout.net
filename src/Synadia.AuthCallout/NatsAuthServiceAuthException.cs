@@ -14,16 +14,8 @@ public class NatsAuthServiceAuthException : Exception
     /// Creates an instance.
     /// </summary>
     /// <param name="message">Error message.</param>
-    /// <param name="user">Related user ID.</param>
-    public NatsAuthServiceAuthException(string message, string user)
+    public NatsAuthServiceAuthException(string message)
         : base(message)
     {
-        User = user;
     }
-
-    /// <summary>
-    /// Gets the user identifier associated with the exception.
-    /// Represents the user-related context involved in the authentication process where the exception was thrown.
-    /// </summary>
-    public string User { get; }
 }

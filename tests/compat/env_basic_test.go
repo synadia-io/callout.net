@@ -65,11 +65,11 @@ func (bc *BasicEnv) ServiceAudience() string {
 	return "$G"
 }
 
-func (bc *BasicEnv) ServiceOpts() []Option {
-	return []Option{
-		ResponseSignerKey(bc.akp),
-	}
-}
+//func (bc *BasicEnv) ServiceOpts() []Option {
+//	return []Option{
+//		ResponseSignerKey(bc.akp),
+//	}
+//}
 
 func (bc *BasicEnv) AccountKey() nkeys.KeyPair {
 	return bc.akp

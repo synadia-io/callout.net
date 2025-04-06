@@ -20,17 +20,38 @@ namespace Compat;
 
 public class Testing
 {
-    private const string SetupOk = "setup_ok";
+    private const string compatTestEncryptionMismatch = "TestEncryptionMismatch";
+    private const string compatTestAuthorizerIsRequired = "TestAuthorizerIsRequired";
+    private const string compatTestSignerOrKeys = "TestSignerOrKeys";
+    private const string compatTestResponseSignerMustBeSeed = "TestResponseSignerMustBeSeed";
+    private const string compatTestResponseSignerMustBeAccount = "TestResponseSignerMustBeAccount";
+    private const string compatRestResponseSignerIssuerMustBeAccount = "RestResponseSignerIssuerMustBeAccount";
+    private const string compatTestResponseSignerIssuerCouldBeSeed = "TestResponseSignerIssuerCouldBeSeed";
+    private const string compatTestResponseSignerIssuer = "TestResponseSignerIssuer";
+    private const string compatTestResponseSignerIssuerBadType = "TestResponseSignerIssuerBadType";
+    private const string compatTestEncryptKey = "TestEncryptKey";
+    private const string compatTestEncryptKeyMustBeSeed = "TestEncryptKeyMustBeSeed";
+    private const string compatTestSetupOK = "TestSetupOK";
+    private const string compatTestAbortRequest = "TestAbortRequest";
+    private const string compatTestBadGenerate = "TestBadGenerate";
+    private const string compatTestBadPermissions = "TestBadPermissions";
+    private const string compatTestBadEncryption = "TestBadEncryption";
+    private const string compatTestAsyncWorkers = "TestAsyncWorkers";
+    private const string compatTestErrorHandler = "TestErrorHandler";
+    private const string compatTestUserErrorHandler = "TestUserErrorHandler";
+
     private const string BasicAccountEnv = "basic_account_env";
     private const string BasicEncryptedEnv = "basic_encrypted_env";
     private const string DelegatedEnv = "delegated_env";
     private const string DelegatedKeysEnv = "delegated_keys_env";
 
-    private const string SubjectServiceAll = "test.service.>";
-    private const string SubjectServiceStop = "test.service.stop";
-    private const string SubjectDriverConnected = "test.driver.connected";
-    private const string SubjectDriverError = "test.driver.error";
-    private const string SubjectDriverVars = "test.driver.vars";
+    private const string SubjectServiceAll = ".test.service.>";
+    private const string SubjectServiceStop = ".test.service.stop";
+    private const string SubjectServiceSync = ".test.service.sync";
+    private const string SubjectDriverConnected = ".test.driver.connected";
+    private const string SubjectDriverError = ".test.driver.error";
+    private const string SubjectDriverSync = ".test.driver.sync";
+    private const string SubjectDriverVars = ".test.driver.vars";
 
     private const string LogName = "SERV";
     private const string EnvCompatDebug = "X_COMPAT_DEBUG";
@@ -46,7 +67,8 @@ public class Testing
         _exe = Path.GetFullPath(Process.GetCurrentProcess().MainModule!.FileName);
         _cwd = SetCurrentDirectoryToProjectRoot();
         _debug = GetDebugFlagValue();
-        Log(1, $" exe path {_exe}");
+        Log(1, $"Starting...");
+        Log(3, $"Exe path {_exe}");
     }
 
     void Log(int level, string message)
@@ -81,21 +103,34 @@ public class Testing
 
     public int Run()
     {
+        Log(3, $"Args: {string.Join(" ", _args)}");
+
         if (_args.Length > 0 && _args[0] == "-r")
         {
             Log(1, "Running tests...");
-            if (_args.Length > 1)
+            if (_args.Length > 2)
             {
-                string natsCoordinationUrl = _args[1];
-                StartAuthServiceAndWaitForTests(natsCoordinationUrl);
+                string suitName = _args[1];
+                string natsCoordinationUrl = _args[2];
+                try
+                {
+                    Log(3, $"Starting auth service for '{suitName}' on '{natsCoordinationUrl}'");
+                    StartAuthServiceAndWaitForTests(suitName, natsCoordinationUrl);
+
+                    Log(1, "Tests completed");
+                    return 0;
+                }
+                catch (Exception e1)
+                {
+                    Err($"Error starting auth service: {e1}");
+                    return 1;
+                }
             }
             else
             {
                 Err("No NATS tests coordination URL provided");
                 return 1;
             }
-
-            return 0;
         }
 
         var go = new Go(_cwd, _exe);
@@ -106,21 +141,32 @@ public class Testing
         return e;
     }
 
-    private void StartAuthServiceAndWaitForTests(string natsCoordiantionUrl)
+    private void StartAuthServiceAndWaitForTests(string suitName, string natsCoordinationUrl)
     {
-        Log(2, $"Connecting to '{natsCoordiantionUrl}'...");
+        string[] parts = suitName.Split('/');
+        string env = parts[0];
+        string name = parts[1];
+        string Subject(string subject) => suitName + subject;
+
+        Log(2, $"Connecting to '{natsCoordinationUrl}' for env:{env} name:{name} ...");
+
         Task.Run(async () =>
         {
-            await using var nt = new NatsConnection(new NatsOpts { Url = natsCoordiantionUrl });
+            await using var nt = new NatsConnection(new NatsOpts { Url = natsCoordinationUrl });
             var rttTest = await nt.PingAsync();
-            Log(1, $"Ping to test coordination server {natsCoordiantionUrl}: {rttTest}");
+            Log(1, $"Ping to test coordination server {natsCoordinationUrl}: {rttTest}");
             var cts = new CancellationTokenSource();
             var tcs = new TaskCompletionSource();
             var testSub = Task.Run(async () =>
             {
-                await foreach (NatsMsg<string> m in nt.SubscribeAsync<string>(SubjectServiceAll, cancellationToken: cts.Token))
+                await foreach (NatsMsg<string> m in nt.SubscribeAsync<string>(Subject(SubjectServiceAll),
+                                   cancellationToken: cts.Token))
                 {
-                    if (m.Subject == SubjectServiceStop)
+                    if (m.Subject == Subject(SubjectServiceSync))
+                    {
+                        await m.ReplyAsync("Ok", cancellationToken: cts.Token);
+                    }
+                    else if (m.Subject == Subject(SubjectServiceStop))
                     {
                         Log(2, "Stopping test service");
                         await cts.CancelAsync();
@@ -130,20 +176,19 @@ public class Testing
                 }
             }, cts.Token);
 
-            var jsonString = await nt.RequestAsync<string>(SubjectDriverVars, cancellationToken: cts.Token);
+            var jsonString = await nt.RequestAsync<string>(Subject(SubjectDriverVars), cancellationToken: cts.Token);
             var json = JsonNode.Parse(jsonString.Data);
 
-            string name;
             string url;
             string username;
             string password;
             string token;
             string audience;
             string userInfoSubj;
-            KeyPair akp;
+            KeyPair? akp = null;
+            KeyPair? ekp = null;
             try
             {
-                name = json["name"]!.GetValue<string>();
                 url = json!["nats_urls"]!.AsArray().First().GetValue<string>();
                 username = json["nats_opts"]!["user"]!.GetValue<string>();
                 password = json["nats_opts"]!["password"]!.GetValue<string>();
@@ -152,10 +197,24 @@ public class Testing
                 token = json["nats_opts"]!["token"]!.GetValue<string>();
                 string accountSeed = json["account_key"]!["seed"]!.GetValue<string>();
                 string accountPk = json["account_key"]!["pk"]!.GetValue<string>();
-                akp = KeyPair.FromSeed(accountSeed);
-                if (accountPk != akp.GetPublicKey())
+                if (!string.IsNullOrEmpty(accountSeed))
                 {
-                    throw new Exception("Invalid account key");
+                    akp = KeyPair.FromSeed(accountSeed);
+                    if (accountPk != akp.GetPublicKey())
+                    {
+                        throw new Exception("Invalid account key");
+                    }
+                }
+
+                string encryptionSeed = json["encryption_key"]!["seed"]!.GetValue<string>();
+                string encryptionPk = json["encryption_key"]!["pk"]!.GetValue<string>();
+                if (!string.IsNullOrEmpty(encryptionSeed))
+                {
+                    ekp = KeyPair.FromSeed(encryptionSeed);
+                    if (encryptionPk != ekp.GetPublicKey())
+                    {
+                        throw new Exception("Invalid encryption key");
+                    }
                 }
             }
             catch (Exception e)
@@ -186,7 +245,7 @@ public class Testing
 
             ValueTask<string> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
             {
-                if (name == SetupOk)
+                if (name == compatTestSetupOK)
                 {
                     Log(2, $"Auth user: {r.NatsConnectOptions.Username}");
                     NatsUserClaims user = jwt.NewUserClaims(r.UserNKey);
@@ -197,33 +256,68 @@ public class Testing
                     return ValueTask.FromResult(jwt.EncodeUserClaims(user, akp));
                 }
 
+                if (name == compatTestEncryptionMismatch)
+                {
+                    // checks at the handler should stop the request before it gets here
+                    throw new Exception("Unexpected callback");
+                }
+
                 throw new Exception($"Can't find Authorizer for name {name}");
             }
 
             ValueTask<string> ResponseSigner(NatsAuthorizationResponseClaims r, CancellationToken cancellationToken)
             {
-                if (name == SetupOk)
+                if (name == compatTestSetupOK)
                 {
                     return ValueTask.FromResult(jwt.EncodeAuthorizationResponseClaims(r, akp));
+                }
+
+                if (name == compatTestEncryptionMismatch)
+                {
+                    // checks at the handler should stop the request before it gets here
+                    throw new Exception("Unexpected callback");
                 }
 
                 throw new Exception($"Can't find ResponseSigner for name {name}");
             }
 
-            var opts = new NatsAuthServiceOpts(Authorizer, ResponseSigner)
+            NatsAuthServiceOpts opts;
+            if (name == compatTestSetupOK)
             {
-                ErrorHandler = async (e, ct) =>
+                opts = new NatsAuthServiceOpts(Authorizer, ResponseSigner)
                 {
-                    Err($"Auth error: {e}");
-                    await nt.PublishAsync(SubjectDriverError, e.Message, cancellationToken: ct);
-                },
-            };
+                    ErrorHandler = async (e, ct) =>
+                    {
+                        Log(1, $"Auth error: {e}");
+                        await nt.PublishAsync(Subject(SubjectDriverError), e.Message, cancellationToken: ct);
+                    },
+                    EncryptionKey = ekp,
+                };
+            }
+            else if (name == compatTestEncryptionMismatch)
+            {
+                opts = new NatsAuthServiceOpts(Authorizer, ResponseSigner)
+                {
+                    ErrorHandler = async (e, ct) =>
+                    {
+                        Log(1, $"Auth error: {e}");
+                        await nt.PublishAsync(Subject(SubjectDriverError), e.Message, cancellationToken: ct);
+                    },
+                    // do the opposite of the server setup so that when server is sending encrypted
+                    // data, the client is not able to decrypt it and vice versa.
+                    EncryptionKey = ekp == null ? KeyPair.CreatePair(PrefixByte.Curve) : null,
+                };
+            }
+            else
+            {
+                throw new Exception($"Can't find options for name {name}");
+            }
 
             await using var service = new NatsAuthService(connection.CreateServicesContext(), opts);
 
             await service.StartAsync(cts.Token);
 
-            await nt.RequestAsync<string>(SubjectDriverConnected, cancellationToken: cts.Token);
+            await nt.RequestAsync<string>(Subject(SubjectDriverConnected), cancellationToken: cts.Token);
 
             await tcs.Task;
             await testSub;

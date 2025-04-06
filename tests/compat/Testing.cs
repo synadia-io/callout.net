@@ -284,7 +284,8 @@ public class Testing
 
         NatsAuthServiceOpts opts = new(Authorizer, ResponseSigner)
         {
-            ErrorHandler = CreateAuthServiceErrorHandler(t), EncryptionKey = t.cv.Ekp,
+            ErrorHandler = CreateAuthServiceErrorHandler(t),
+            EncryptionKey = t.cv.Ekp,
         };
 
         await InitializeAndStartAuthServiceAndWait(t, opts);
@@ -327,7 +328,8 @@ public class Testing
 
         NatsAuthServiceOpts opts = new(Authorizer, ResponseSigner)
         {
-            ErrorHandler = CreateAuthServiceErrorHandler(t), EncryptionKey = t.cv.Ekp,
+            ErrorHandler = CreateAuthServiceErrorHandler(t),
+            EncryptionKey = t.cv.Ekp,
         };
 
         await InitializeAndStartAuthServiceAndWait(t, opts);

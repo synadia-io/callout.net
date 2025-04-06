@@ -209,7 +209,10 @@ record NscUser : NscEntry
         (KeyPair issuer, KeyPair subject) = store.GetIssuerAndSubjectKeys(payload);
         return new NscUser
         {
-            Name = file.Name, JwtPayload = payload, Issuer = issuer, Subject = subject,
+            Name = file.Name,
+            JwtPayload = payload,
+            Issuer = issuer,
+            Subject = subject,
         };
     }
 }

@@ -236,7 +236,8 @@ public class Testing
 
             await using var connection = new NatsConnection(new NatsOpts
             {
-                Url = url, AuthOpts = new NatsAuthOpts { Username = username, Password = password, Token = token, },
+                Url = url,
+                AuthOpts = new NatsAuthOpts { Username = username, Password = password, Token = token, },
             });
             var rtt = await connection.PingAsync(cts.Token);
             Log(3, $"Connection RTT {rtt}");

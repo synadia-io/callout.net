@@ -136,7 +136,6 @@ func (s *CalloutSuite) TestEncryptionMismatch() {
     lastErr := es.GetLastError()
     s.Contains(lastErr, "encryption mismatch")
 }
-
 func (s *CalloutSuite) TestSetupOK() {
     es := StartExternalAuthService(s)
     defer es.Stop()
@@ -147,4 +146,32 @@ func (s *CalloutSuite) TestSetupOK() {
     info := nst.ClientInfo(s.T(), c)
     s.Contains(info.Data.Permissions.Pub.Allow, nst.UserInfoSubj)
     s.Contains(info.Data.Permissions.Sub.Allow, "_INBOX.>")
+}
+
+func (s *CalloutSuite) TestAbortRequest() {
+    es := StartExternalAuthService(s)
+    defer es.Stop()
+
+    nc, err := s.userConn(nats.UserInfo("hello", "world"))
+    s.NoError(err)
+    s.NotNil(nc)
+    defer nc.Close()
+
+    _, err = s.userConn(
+        nats.UserInfo("errorme", ""),
+        nats.MaxReconnects(1),
+    )
+    s.Error(err)
+
+    _, err = s.userConn(
+        nats.UserInfo("blacklisted", ""),
+        nats.MaxReconnects(1),
+    )
+    s.Error(err)
+
+    _, err = s.userConn(
+        nats.UserInfo("blank", ""),
+        nats.MaxReconnects(1),
+    )
+    s.Error(err)
 }

@@ -279,8 +279,6 @@ public class Testing
                 var store = new NscStore(t.cv.NscDir);
                 var op = store.LoadOperators().First(o => o.Name == "O");
                 var a = op.Accounts.First(a => a.Name == "A");
-
-                // user.SetScoped(true);
                 user.User.IssuerAccount = a.Subject.GetPublicKey();
                 return ValueTask.FromResult(t.jwt.EncodeUserClaims(user, a.SigningKeys[0]));
             }
@@ -296,7 +294,6 @@ public class Testing
             {
                 var store = new NscStore(t.cv.NscDir);
                 var op = store.LoadOperators().First(o => o.Name == "O");
-                var a = op.Accounts.First(a => a.Name == "A");
                 var c = op.Accounts.First(a => a.Name == "C");
                 r.AuthorizationResponse.IssuerAccount = c.Subject.GetPublicKey();
                 return ValueTask.FromResult(t.jwt.EncodeAuthorizationResponseClaims(r, c.SigningKeys[0]));
@@ -314,108 +311,69 @@ public class Testing
 
         await InitializeAndStartAuthServiceAndWait(t, opts);
     }
-}
 
-public record T
-{
-    public CompatVars cv { get; init; }
-    public CancellationTokenSource cts { get; init; }
-    public TaskCompletionSource tcs { get; init; }
-    public NatsConnection nt { get; init; }
-    public NatsConnection connection { get; init; }
-    public string name { get; init; }
-    public string suitName { get; init; }
-    public NatsJwt jwt { get; init; }
-    public string env { get; init; }
-
-    public string Subject(string suffix)
+    public async Task TestAbortRequest(T t)
     {
-        return suitName + suffix;
-    }
-}
-
-public record CompatVars
-{
-    public string SuitName { get; init; }
-    public string Name { get; init; }
-    public string Env { get; init; }
-    public string Url { get; init; }
-    public string Username { get; init; }
-    public string Password { get; init; }
-    public string Token { get; init; }
-    public string Audience { get; init; }
-    public string UserInfoSubj { get; init; }
-
-    public Dictionary<string, KeyPair> AccountKeys { get; init; }
-    public KeyPair? Ekp { get; init; }
-
-    public static CompatVars FromJson(string suitName, string jsonString)
-    {
-        string[] parts = suitName.Split('/');
-        string env = parts[0];
-        string name = parts[1];
-
-        var json = JsonNode.Parse(jsonString);
-        if (json == null)
+        ValueTask<string> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
         {
-            throw new Exception("Failed to parse JSON");
-        }
+            Log(2, $"Auth user: {r.NatsConnectOptions.Username}");
 
-        Dictionary<string, KeyPair> keys = new();
-        foreach ((string? key, JsonNode? value) in json["account_keys"].AsObject())
-        {
-            if (string.IsNullOrWhiteSpace(key) || value == null) continue;
-            string seed = value["seed"]!.GetValue<string>();
-            string pk = value["pk"]!.GetValue<string>();
-            if (!string.IsNullOrEmpty(seed))
+            if (r.NatsConnectOptions.Username == "blacklisted")
             {
-                var kp = KeyPair.FromSeed(seed);
-                if (pk != kp.GetPublicKey())
-                {
-                    throw new Exception("Invalid account key");
-                }
+                throw new Exception("abort request");
+            }
 
-                keys[key] = kp;
+            if (r.NatsConnectOptions.Username == "errorme")
+            {
+                throw new Exception("service error: testing errorme");
+            }
+
+            if (r.NatsConnectOptions.Username == "blank")
+            {
+                return ValueTask.FromResult("");
+            }
+
+            NatsUserClaims user = t.jwt.NewUserClaims(r.UserNKey);
+            user.Audience = t.cv.Audience;
+            user.User.Pub.Allow = [t.cv.UserInfoSubj];
+            user.User.Sub.Allow = ["_INBOX.>"];
+            user.Expires = DateTimeOffset.Now + TimeSpan.FromSeconds(90);
+
+            if (t.cv.Env.StartsWith("TestDelegated"))
+            {
+                var store = new NscStore(t.cv.NscDir);
+                var op = store.LoadOperators().First(o => o.Name == "O");
+                var a = op.Accounts.First(a => a.Name == "A");
+                user.User.IssuerAccount = a.Subject.GetPublicKey();
+                return ValueTask.FromResult(t.jwt.EncodeUserClaims(user, a.SigningKeys[0]));
+            }
+            else
+            {
+                return ValueTask.FromResult(t.jwt.EncodeUserClaims(user, t.cv.AccountKeys["A"]));
             }
         }
 
-        KeyPair? ekp = null;
-        string encryptionSeed = json["encryption_key"]!["seed"]!.GetValue<string>();
-        string encryptionPk = json["encryption_key"]!["pk"]!.GetValue<string>();
-        if (!string.IsNullOrEmpty(encryptionSeed))
+        ValueTask<string> ResponseSigner(NatsAuthorizationResponseClaims r, CancellationToken cancellationToken)
         {
-            ekp = KeyPair.FromSeed(encryptionSeed);
-            if (encryptionPk != ekp.GetPublicKey())
+            if (t.cv.Env.StartsWith("TestDelegated"))
             {
-                throw new Exception("Invalid encryption key");
+                var store = new NscStore(t.cv.NscDir);
+                var op = store.LoadOperators().First(o => o.Name == "O");
+                var c = op.Accounts.First(a => a.Name == "C");
+                r.AuthorizationResponse.IssuerAccount = c.Subject.GetPublicKey();
+                return ValueTask.FromResult(t.jwt.EncodeAuthorizationResponseClaims(r, c.SigningKeys[0]));
+            }
+            else
+            {
+                return ValueTask.FromResult(t.jwt.EncodeAuthorizationResponseClaims(r, t.cv.AccountKeys["A"]));
             }
         }
 
-        return new CompatVars
+        NatsAuthServiceOpts opts = new(Authorizer, ResponseSigner)
         {
-            SuitName = suitName,
-            Name = name,
-            Env = env,
-            Url = json!["nats_urls"]!.AsArray().First().GetValue<string>(),
-            Username = json["nats_opts"]!["user"]!.GetValue<string>(),
-            Password = json["nats_opts"]!["password"]!.GetValue<string>(),
-            Token = json["nats_opts"]!["token"]!.GetValue<string>(),
-            Audience = json["audience"]!.GetValue<string>(),
-            UserInfoSubj = json["user_info_subj"]!.GetValue<string>(),
-            Dir = json["dir"]!.GetValue<string>(),
-            NscDir = json["nsc_dir"]!.GetValue<string>(),
-            ServiceCreds = json["service_creds"]!.GetValue<string>(),
-            SentinelCreds = json["sentinel_creds"]!.GetValue<string>(),
-            Ekp = ekp,
-            AccountKeys = keys,
+            ErrorHandler = CreateAuthServiceErrorHandler(t), EncryptionKey = t.cv.Ekp,
         };
+
+        await InitializeAndStartAuthServiceAndWait(t, opts);
     }
-
-    public string SentinelCreds { get; init; }
-
-    public string ServiceCreds { get; init; }
-
-    public string NscDir { get; init; }
-
-    public string Dir { get; init; }
 }

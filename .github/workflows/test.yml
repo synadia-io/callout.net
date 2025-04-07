@@ -44,6 +44,11 @@ jobs:
       - name: Check nats-server
         run: nats-server -v
 
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.x'
+
       - name: Setup dotnet
         uses: actions/setup-dotnet@v4
         with:
@@ -59,3 +64,12 @@ jobs:
 
       - name: Test
         run: dotnet test --no-build --logger:"console;verbosity=normal"
+
+      - name: Compat Test
+        env:
+          X_COMPAT_EXE: bin/Debug/net8.0/compat
+        run: |
+          cd tests/compat
+          dotnet build
+          go test -v
+

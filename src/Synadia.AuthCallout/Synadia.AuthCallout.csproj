@@ -5,6 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+    <PackageTags>nats,authcallout</PackageTags>
+    <Description>Synadia NATS Auth Callout for .NET</Description>
     <IsPackable>true</IsPackable>
   </PropertyGroup>
 

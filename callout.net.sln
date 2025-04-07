@@ -32,6 +32,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "workflows", "workflows", "{
 	ProjectSection(SolutionItems) = preProject
 		.github\workflows\format.yml = .github\workflows\format.yml
 		.github\workflows\test.yml = .github\workflows\test.yml
+		.github\workflows\release.yml = .github\workflows\release.yml
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "compat", "tests\compat\compat.csproj", "{25EFB419-55B6-4BFB-BF03-F5EB1C0346AF}"

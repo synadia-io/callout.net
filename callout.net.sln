@@ -34,6 +34,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "workflows", "workflows", "{
 		.github\workflows\test.yml = .github\workflows\test.yml
 	EndProjectSection
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "compat", "tests\compat\compat.csproj", "{25EFB419-55B6-4BFB-BF03-F5EB1C0346AF}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -47,6 +49,7 @@ Global
 		{59E78136-1175-4385-BAE5-97D1EDB150D9} = {242B9172-5DAD-4B54-80C4-C34D36CA9302}
 		{F6DE750B-FC14-4CE5-A12E-E3E3F791E3C2} = {E6241CB5-ECE1-4593-BAE1-7752249A373E}
 		{A0438527-3F3D-4CC5-B422-C643C5EE7976} = {F223C628-0627-4C07-998D-DD74B74379C2}
+		{25EFB419-55B6-4BFB-BF03-F5EB1C0346AF} = {E6241CB5-ECE1-4593-BAE1-7752249A373E}
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{859C0248-9DED-4290-9F56-641D572A19A5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
@@ -61,5 +64,9 @@ Global
 		{F6DE750B-FC14-4CE5-A12E-E3E3F791E3C2}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F6DE750B-FC14-4CE5-A12E-E3E3F791E3C2}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F6DE750B-FC14-4CE5-A12E-E3E3F791E3C2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{25EFB419-55B6-4BFB-BF03-F5EB1C0346AF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{25EFB419-55B6-4BFB-BF03-F5EB1C0346AF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{25EFB419-55B6-4BFB-BF03-F5EB1C0346AF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{25EFB419-55B6-4BFB-BF03-F5EB1C0346AF}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

@@ -22,7 +22,7 @@ var jwt = new NatsJwt();
 
 await using var connection = new NatsConnection(new NatsOpts { AuthOpts = new NatsAuthOpts { CredsFile = creds } });
 
-ValueTask<string> Authorizer(NatsAuthorizationRequest r)
+ValueTask<string> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
 {
     NatsUserClaims user = jwt.NewUserClaims(r.UserNKey);
 
@@ -34,14 +34,14 @@ ValueTask<string> Authorizer(NatsAuthorizationRequest r)
     return ValueTask.FromResult(jwt.EncodeUserClaims(user, akp));
 }
 
-ValueTask<string> ResponseSigner(NatsAuthorizationResponseClaims r)
+ValueTask<string> ResponseSigner(NatsAuthorizationResponseClaims r, CancellationToken cancellationToken)
 {
     return ValueTask.FromResult(jwt.EncodeAuthorizationResponseClaims(r, ckp));
 }
 
 var opts = new NatsAuthServiceOpts(Authorizer, ResponseSigner)
 {
-    ErrorHandler = e =>
+    ErrorHandler = (e, ct) =>
     {
         Console.WriteLine($"ERROR: {e}");
         return default;

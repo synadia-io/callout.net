@@ -22,16 +22,16 @@ var jwt = new NatsJwt();
 
 await using var connection = new NatsConnection(new NatsOpts { AuthOpts = new NatsAuthOpts { CredsFile = creds } });
 
-ValueTask<string> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
+ValueTask<NatsAuthorizerResult> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
 {
     NatsUserClaims user = jwt.NewUserClaims(r.UserNKey);
 
     if (r.NatsConnectOptions.Name == "bad")
     {
-        return ValueTask.FromResult(string.Empty);
+        return ValueTask.FromResult(new NatsAuthorizerResult(string.Empty, 401, "user is not authorized"));
     }
 
-    return ValueTask.FromResult(jwt.EncodeUserClaims(user, akp));
+    return ValueTask.FromResult(new NatsAuthorizerResult(jwt.EncodeUserClaims(user, akp)));
 }
 
 ValueTask<string> ResponseSigner(NatsAuthorizationResponseClaims r, CancellationToken cancellationToken)

@@ -98,10 +98,10 @@ public class AuthServiceTest(ITestOutputHelper output)
 
                 if (r.NatsConnectOptions.Name == "bad")
                 {
-                    return ValueTask.FromResult(string.Empty);
+                    return ValueTask.FromResult(new NatsAuthorizerResult(string.Empty, 401, "Unauthorized"));
                 }
 
-                return ValueTask.FromResult(jwt.EncodeUserClaims(user, akp));
+                return ValueTask.FromResult(new NatsAuthorizerResult(jwt.EncodeUserClaims(user, akp)));
             },
             responseSigner: (r, ct) => ValueTask.FromResult(jwt.EncodeAuthorizationResponseClaims(r, akp)))
         {
@@ -172,10 +172,10 @@ public class AuthServiceTest(ITestOutputHelper output)
 
                 if (r.NatsConnectOptions.Name == "bad")
                 {
-                    return ValueTask.FromResult(string.Empty);
+                    return ValueTask.FromResult(new NatsAuthorizerResult(string.Empty, 401, "Unauthorized"));
                 }
 
-                return ValueTask.FromResult(jwt.EncodeUserClaims(user, akp));
+                return ValueTask.FromResult(new NatsAuthorizerResult(jwt.EncodeUserClaims(user, akp)));
             },
             responseSigner: (r, ct) => ValueTask.FromResult(jwt.EncodeAuthorizationResponseClaims(r, akp)))
         {

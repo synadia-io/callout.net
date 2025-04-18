@@ -1,4 +1,4 @@
-﻿// Copyright (c) Synadia Communications, Inc. All rights reserved.
+// Copyright (c) Synadia Communications, Inc. All rights reserved.
 // Licensed under the Apache License, Version 2.0.
 
 using NATS.Jwt.Models;
@@ -17,7 +17,7 @@ public record NatsAuthServiceOpts
     /// <param name="authorizer">Authorizer callback.</param>
     /// <param name="responseSigner">Response signer callback.</param>
     public NatsAuthServiceOpts(
-        Func<NatsAuthorizationRequest, CancellationToken, ValueTask<string>> authorizer,
+        Func<NatsAuthorizationRequest, CancellationToken, ValueTask<NatsAuthorizerResult>> authorizer,
         Func<NatsAuthorizationResponseClaims, CancellationToken, ValueTask<string>> responseSigner)
     {
         Authorizer = authorizer;
@@ -32,9 +32,11 @@ public record NatsAuthServiceOpts
     public KeyPair? EncryptionKey { get; init; }
 
     /// <summary>
-    /// Gets a function that processes authorization request and issues user JWTs.
+    /// Gets a function that processes authorization request and returns authorization result.
+    /// The function takes a <see cref="NatsAuthorizationRequest"/> and a CancellationToken as input, and returns
+    /// a <see cref="NatsAuthorizerResult"/> which contains the user JWT and an optional error message.
     /// </summary>
-    public Func<NatsAuthorizationRequest, CancellationToken, ValueTask<string>> Authorizer { get; init; }
+    public Func<NatsAuthorizationRequest, CancellationToken, ValueTask<NatsAuthorizerResult>> Authorizer { get; init; }
 
     /// <summary>
     /// Gets a function that performs the signing of the <see cref="NatsAuthorizationResponseClaims"/>.

@@ -1,4 +1,4 @@
-﻿// Copyright (c) Synadia Communications, Inc. All rights reserved.
+// Copyright (c) Synadia Communications, Inc. All rights reserved.
 // Licensed under the Apache License, Version 2.0.
 
 #pragma warning disable
@@ -251,7 +251,7 @@ public class Testing
 
     public async Task TestEncryptionMismatch(TestContext t)
     {
-        ValueTask<string> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
+        ValueTask<NatsAuthorizerResult> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
         {
             throw new Exception("checks at the handler should stop the request before it gets here");
         }
@@ -275,7 +275,7 @@ public class Testing
 
     public async Task TestSetupOK(TestContext t)
     {
-        async ValueTask<string> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
+        async ValueTask<NatsAuthorizerResult> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
         {
             Log(2, $"Auth user: {r.NatsConnectOptions.Username}");
             NatsUserClaims user = t.jwt.NewUserClaims(r.UserNKey);
@@ -284,7 +284,7 @@ public class Testing
             user.User.Sub.Allow = ["_INBOX.>"];
             user.Expires = DateTimeOffset.Now + TimeSpan.FromSeconds(90);
 
-            return t.Encoder.Encode(user);
+            return new NatsAuthorizerResult(t.Encoder.Encode(user));
         }
 
         async ValueTask<string> ResponseSigner(NatsAuthorizationResponseClaims r, CancellationToken cancellationToken)
@@ -303,7 +303,7 @@ public class Testing
 
     public async Task TestAbortRequest(TestContext t)
     {
-        async ValueTask<string> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
+        async ValueTask<NatsAuthorizerResult> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
         {
             Log(2, $"Auth user: {r.NatsConnectOptions.Username}");
 
@@ -319,7 +319,7 @@ public class Testing
 
             if (r.NatsConnectOptions.Username == "blank")
             {
-                return "";
+                return new NatsAuthorizerResult(string.Empty, 401, "Unauthorized");
             }
 
             NatsUserClaims user = t.jwt.NewUserClaims(r.UserNKey);
@@ -328,7 +328,7 @@ public class Testing
             user.User.Sub.Allow = ["_INBOX.>"];
             user.Expires = DateTimeOffset.Now + TimeSpan.FromSeconds(90);
 
-            return t.Encoder.Encode(user);
+            return new NatsAuthorizerResult(t.Encoder.Encode(user));
         }
 
         async ValueTask<string> ResponseSigner(NatsAuthorizationResponseClaims r, CancellationToken cancellationToken)

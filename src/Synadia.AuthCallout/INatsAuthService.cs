@@ -1,4 +1,4 @@
-﻿// Copyright (c) Synadia Communications, Inc. All rights reserved.
+// Copyright (c) Synadia Communications, Inc. All rights reserved.
 // Licensed under the Apache License, Version 2.0.
 
 using NATS.Client.Services;
@@ -26,6 +26,6 @@ public interface INatsAuthService : IAsyncDisposable
     /// </summary>
     /// <param name="msg">The incoming request message containing the data to process.</param>
     /// <param name="cancellationToken">A cancellation token to observe while waiting for the operation to complete.</param>
-    /// <returns>A task that represents the asynchronous operation, containing the processed response as a byte array.</returns>
-    ValueTask<byte[]> ProcessRequestAsync(NatsSvcMsg<byte[]> msg, CancellationToken cancellationToken = default);
+    /// <returns>A task that represents the asynchronous operation, containing the processed response as a NatsAuthServiceResponse with the JWT token and error code.</returns>
+    ValueTask<NatsAuthServiceResponse> ProcessRequestAsync(NatsSvcMsg<byte[]> msg, CancellationToken cancellationToken = default);
 }

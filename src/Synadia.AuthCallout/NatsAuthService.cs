@@ -48,8 +48,15 @@ public class NatsAuthService : INatsAuthService
             {
                 try
                 {
-                    byte[] token = await ProcessRequestAsync(msg, cancellationToken);
-                    await msg.ReplyAsync(token, cancellationToken: cancellationToken);
+                    NatsAuthServiceResponse res = await ProcessRequestAsync(msg, cancellationToken);
+                    if (res.ErrorCode == 0)
+                    {
+                        await msg.ReplyAsync(res.Token, cancellationToken: cancellationToken);
+                    }
+                    else
+                    {
+                        await msg.ReplyErrorAsync(res.ErrorCode, "Unauthorized", res.Token, cancellationToken: cancellationToken);
+                    }
                 }
                 catch (NatsAuthServiceAuthException e)
                 {
@@ -76,23 +83,29 @@ public class NatsAuthService : INatsAuthService
     }
 
     /// <inheritdoc />
-    public async ValueTask<byte[]> ProcessRequestAsync(NatsSvcMsg<byte[]> msg, CancellationToken cancellationToken = default)
+    public async ValueTask<NatsAuthServiceResponse> ProcessRequestAsync(
+        NatsSvcMsg<byte[]> msg,
+        CancellationToken cancellationToken = default)
     {
         var (isEncrypted, req) = DecodeJwt(msg);
-        var res = new NatsAuthorizationResponseClaims
-        {
-            Subject = req.UserNKey,
-            Audience = req.NatsServer.Id,
-        };
+        var res = new NatsAuthorizationResponseClaims { Subject = req.UserNKey, Audience = req.NatsServer.Id, };
 
-        string user = await _opts.Authorizer(req, cancellationToken);
+        NatsAuthorizerResult authResult = await _opts.Authorizer(req, cancellationToken);
 
-        if (user == string.Empty)
+        if (authResult is { Token: "", ErrorCode: 0 })
         {
-            throw new NatsAuthServiceAuthException("Error authorizing: authorizer didn't generate a JWT");
+            throw new NatsAuthServiceAuthException(
+                "Error authorizing: authorizer didn't generate a JWT and no error was provided");
         }
 
-        res.AuthorizationResponse.Jwt = user;
+        if (authResult.ErrorCode != 0 || authResult.ErrorMsg != string.Empty)
+        {
+            res.AuthorizationResponse.Error = authResult.ErrorMsg;
+        }
+        else
+        {
+            res.AuthorizationResponse.Jwt = authResult.Token;
+        }
 
         string tokenString = await _opts.ResponseSigner(res, cancellationToken);
         byte[] token = Encoding.ASCII.GetBytes(tokenString);
@@ -103,7 +116,7 @@ public class NatsAuthService : INatsAuthService
             token = seal;
         }
 
-        return token;
+        return new NatsAuthServiceResponse(token, authResult.ErrorCode);
     }
 
     /// <summary>
@@ -177,7 +190,8 @@ public class NatsAuthService : INatsAuthService
 
         if (arc.Issuer != arc.AuthorizationRequest.NatsServer.Id)
         {
-            throw new NatsAuthServiceException($"Bad request: issuers don't match: {arc.Issuer} != {arc.AuthorizationRequest.NatsServer.Id}");
+            throw new NatsAuthServiceException(
+                $"Bad request: issuers don't match: {arc.Issuer} != {arc.AuthorizationRequest.NatsServer.Id}");
         }
 
         if (arc.Audience != ExpectedAudience)

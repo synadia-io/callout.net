@@ -102,8 +102,10 @@ public class NatsAuthService : INatsAuthService
         {
             res.AuthorizationResponse.Error = authResult.ErrorMsg;
         }
-
-        res.AuthorizationResponse.Jwt = authResult.Token;
+        else
+        {
+            res.AuthorizationResponse.Jwt = authResult.Token;
+        }
 
         string tokenString = await _opts.ResponseSigner(res, cancellationToken);
         byte[] token = Encoding.ASCII.GetBytes(tokenString);

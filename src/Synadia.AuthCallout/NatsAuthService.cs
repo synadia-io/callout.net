@@ -1,4 +1,4 @@
-﻿// Copyright (c) Synadia Communications, Inc. All rights reserved.
+// Copyright (c) Synadia Communications, Inc. All rights reserved.
 // Licensed under the Apache License, Version 2.0.
 
 using System.Text;
@@ -25,6 +25,7 @@ public class NatsAuthService : INatsAuthService
     private readonly NatsAuthServiceOpts _opts;
     private readonly NatsJwt _natsJwt = new();
     private readonly ILogger<NatsAuthService> _logger;
+    private readonly CancellationTokenSource _cts = new();
     private INatsSvcServer? _server;
 
     /// <summary>
@@ -48,33 +49,33 @@ public class NatsAuthService : INatsAuthService
             {
                 try
                 {
-                    NatsAuthServiceResponse res = await ProcessRequestAsync(msg, cancellationToken);
+                    NatsAuthServiceResponse res = await ProcessRequestAsync(msg, cancellationToken: _cts.Token);
                     if (res.ErrorCode == 0)
                     {
-                        await msg.ReplyAsync(res.Token, cancellationToken: cancellationToken);
+                        await msg.ReplyAsync(res.Token, cancellationToken: _cts.Token);
                     }
                     else
                     {
-                        await msg.ReplyErrorAsync(res.ErrorCode, "Unauthorized", res.Token, cancellationToken: cancellationToken);
+                        await msg.ReplyErrorAsync(res.ErrorCode, "Unauthorized", res.Token, cancellationToken: _cts.Token);
                     }
                 }
                 catch (NatsAuthServiceAuthException e)
                 {
                     _logger.LogInformation(e, "Auth error");
                     await CallErrorHandlerAsync(e, cancellationToken);
-                    await msg.ReplyErrorAsync(401, "Unauthorized", cancellationToken: cancellationToken);
+                    await msg.ReplyErrorAsync(401, "Unauthorized", cancellationToken: _cts.Token);
                 }
                 catch (NatsAuthServiceException e)
                 {
                     _logger.LogWarning(e, "Service error");
                     await CallErrorHandlerAsync(e, cancellationToken);
-                    await msg.ReplyErrorAsync(400, e.Message, cancellationToken: cancellationToken);
+                    await msg.ReplyErrorAsync(400, e.Message, cancellationToken: _cts.Token);
                 }
                 catch (Exception e)
                 {
                     _logger.LogError(e, "Generic error");
                     await CallErrorHandlerAsync(e, cancellationToken);
-                    await msg.ReplyErrorAsync(400, e.Message, cancellationToken: cancellationToken);
+                    await msg.ReplyErrorAsync(400, e.Message, cancellationToken: _cts.Token);
                 }
             },
             name: "auth-request-handler",
@@ -126,6 +127,8 @@ public class NatsAuthService : INatsAuthService
     /// <returns>A task that represents the asynchronous dispose operation.</returns>
     public async ValueTask DisposeAsync()
     {
+        _cts.Cancel();
+        _cts.Dispose();
         if (_server != null)
         {
             await _server.DisposeAsync();

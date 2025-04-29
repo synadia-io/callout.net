@@ -27,6 +27,7 @@ public class NatsAuthService : INatsAuthService
     private readonly ILogger<NatsAuthService> _logger;
     private readonly CancellationTokenSource _cts = new();
     private INatsSvcServer? _server;
+    private int _disposed;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="NatsAuthService"/> class.
@@ -43,6 +44,11 @@ public class NatsAuthService : INatsAuthService
     /// <inheritdoc />
     public async ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            throw new ObjectDisposedException(nameof(NatsAuthService));
+        }
+
         _server = await _svc.AddServiceAsync("auth-server", "1.0.0", cancellationToken: cancellationToken);
         await _server.AddEndpointAsync<byte[]>(
             handler: async msg =>
@@ -127,11 +133,18 @@ public class NatsAuthService : INatsAuthService
     /// <returns>A task that represents the asynchronous dispose operation.</returns>
     public async ValueTask DisposeAsync()
     {
-        _cts.Cancel();
-        _cts.Dispose();
-        if (_server != null)
+        if (Interlocked.Increment(ref _disposed) == 1)
         {
-            await _server.DisposeAsync();
+#if NETSTANDARD2_0
+            _cts.Cancel();
+#else
+            await _cts.CancelAsync();
+#endif
+            _cts.Dispose();
+            if (_server != null)
+            {
+                await _server.DisposeAsync();
+            }
         }
     }
 

@@ -15,24 +15,23 @@ public class AuthServiceTest(ITestOutputHelper output)
     [Fact]
     public async Task Connect_with_jwt()
     {
-        var jwt = new NatsJwt();
         var okp = KeyPair.CreatePair(PrefixByte.Operator);
         var opk = okp.GetPublicKey();
-        var oc = jwt.NewOperatorClaims(opk);
+        var oc = NatsJwt.NewOperatorClaims(opk);
         oc.Name = "Example Operator";
         var oskp = KeyPair.CreatePair(PrefixByte.Operator);
         var ospk = oskp.GetPublicKey();
         oc.Operator.SigningKeys = [ospk];
-        var operatorJwt = jwt.EncodeOperatorClaims(oc, okp);
+        var operatorJwt = NatsJwt.EncodeOperatorClaims(oc, okp);
 
         var akp = KeyPair.CreatePair(PrefixByte.Account);
         var apk = akp.GetPublicKey();
-        var ac = jwt.NewAccountClaims(apk);
+        var ac = NatsJwt.NewAccountClaims(apk);
         ac.Name = "Example Account";
         var askp = KeyPair.CreatePair(PrefixByte.Account);
         var aspk = askp.GetPublicKey();
         ac.Account.SigningKeys = [aspk];
-        var accountJwt = jwt.EncodeAccountClaims(ac, oskp);
+        var accountJwt = NatsJwt.EncodeAccountClaims(ac, oskp);
 
         string conf = $$"""
                         operator: {{operatorJwt}}
@@ -47,9 +46,9 @@ public class AuthServiceTest(ITestOutputHelper output)
 
         var ukp = KeyPair.CreatePair(PrefixByte.User);
         var upk = ukp.GetPublicKey();
-        var uc = jwt.NewUserClaims(upk);
+        var uc = NatsJwt.NewUserClaims(upk);
         uc.User.IssuerAccount = apk;
-        var userJwt = jwt.EncodeUserClaims(uc, askp);
+        var userJwt = NatsJwt.EncodeUserClaims(uc, askp);
         var userSeed = ukp.GetSeed();
 
         var authOpts = new NatsAuthOpts { Jwt = userJwt, Seed = userSeed };
@@ -61,8 +60,6 @@ public class AuthServiceTest(ITestOutputHelper output)
     [Fact]
     public async Task Connect_with_callout()
     {
-        var jwt = new NatsJwt();
-
         var akp = KeyPair.CreatePair(PrefixByte.Account);
         var apk = akp.GetPublicKey();
 
@@ -90,7 +87,7 @@ public class AuthServiceTest(ITestOutputHelper output)
         var opts = new NatsAuthServiceOpts(
             authorizer: (r, ct) =>
             {
-                NatsUserClaims user = jwt.NewUserClaims(r.UserNKey);
+                NatsUserClaims user = NatsJwt.NewUserClaims(r.UserNKey);
                 user.Audience = "AUTH";
                 user.Name = Convert.ToBase64String(Encoding.UTF8.GetBytes("User1"));
                 user.User.Pub.Allow = [">"];
@@ -101,9 +98,9 @@ public class AuthServiceTest(ITestOutputHelper output)
                     return ValueTask.FromResult(new NatsAuthorizerResult(string.Empty, 401, "Unauthorized"));
                 }
 
-                return ValueTask.FromResult(new NatsAuthorizerResult(jwt.EncodeUserClaims(user, akp)));
+                return ValueTask.FromResult(new NatsAuthorizerResult(NatsJwt.EncodeUserClaims(user, akp)));
             },
-            responseSigner: (r, ct) => ValueTask.FromResult(jwt.EncodeAuthorizationResponseClaims(r, akp)))
+            responseSigner: (r, ct) => ValueTask.FromResult(NatsJwt.EncodeAuthorizationResponseClaims(r, akp)))
         {
             ErrorHandler = (e, ct) =>
             {
@@ -132,8 +129,6 @@ public class AuthServiceTest(ITestOutputHelper output)
     [Fact]
     public async Task Connect_with_callout_with_xkey()
     {
-        var jwt = new NatsJwt();
-
         var xkp = KeyPair.CreatePair(PrefixByte.Curve);
 
         var akp = KeyPair.CreatePair(PrefixByte.Account);
@@ -164,7 +159,7 @@ public class AuthServiceTest(ITestOutputHelper output)
         var opts = new NatsAuthServiceOpts(
             authorizer: (r, ct) =>
             {
-                NatsUserClaims user = jwt.NewUserClaims(r.UserNKey);
+                NatsUserClaims user = NatsJwt.NewUserClaims(r.UserNKey);
                 user.Audience = "AUTH";
                 user.Name = Convert.ToBase64String(Encoding.UTF8.GetBytes("User1"));
                 user.User.Pub.Allow = [">"];
@@ -175,9 +170,9 @@ public class AuthServiceTest(ITestOutputHelper output)
                     return ValueTask.FromResult(new NatsAuthorizerResult(string.Empty, 401, "Unauthorized"));
                 }
 
-                return ValueTask.FromResult(new NatsAuthorizerResult(jwt.EncodeUserClaims(user, akp)));
+                return ValueTask.FromResult(new NatsAuthorizerResult(NatsJwt.EncodeUserClaims(user, akp)));
             },
-            responseSigner: (r, ct) => ValueTask.FromResult(jwt.EncodeAuthorizationResponseClaims(r, akp)))
+            responseSigner: (r, ct) => ValueTask.FromResult(NatsJwt.EncodeAuthorizationResponseClaims(r, akp)))
         {
             EncryptionKey = xkp,
             ErrorHandler = (e, ct) =>

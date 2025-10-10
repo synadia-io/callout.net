@@ -8,19 +8,18 @@ string issuer = "/path/to/seed/file/A.nk";
 
 KeyPair ckp = KeyPair.FromSeed(File.ReadAllText(calloutIssuer));
 KeyPair akp = KeyPair.FromSeed(File.ReadAllText(issuer));
-var jwt = new NatsJwt();
 
 await using var connection = new NatsConnection(new NatsOpts { AuthOpts = new NatsAuthOpts { CredsFile = "/path/to/service.creds" } });
 
 async ValueTask<string> Authorizer(NatsAuthorizationRequest r)
 {
-    NatsUserClaims user = jwt.NewUserClaims(r.UserNKey);
-    return jwt.EncodeUserClaims(user, akp);
+    NatsUserClaims user = NatsJwt.NewUserClaims(r.UserNKey);
+    return NatsJwt.EncodeUserClaims(user, akp);
 }
 
 async ValueTask<string> ResponseSigner(NatsAuthorizationResponseClaims r)
 {
-    return jwt.EncodeAuthorizationResponseClaims(r, ckp);
+    return NatsJwt.EncodeAuthorizationResponseClaims(r, ckp);
 }
 
 var opts = new NatsAuthServiceOpts(Authorizer, ResponseSigner)

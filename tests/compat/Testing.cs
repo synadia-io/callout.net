@@ -231,7 +231,6 @@ public class Testing
                 tcs = tcs,
                 nt = nt,
                 connection = connection,
-                jwt = new NatsJwt(),
             };
 
             MethodInfo? methodInfo = GetType().GetMethod(name);
@@ -278,7 +277,7 @@ public class Testing
         async ValueTask<NatsAuthorizerResult> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
         {
             Log(2, $"Auth user: {r.NatsConnectOptions.Username}");
-            NatsUserClaims user = t.jwt.NewUserClaims(r.UserNKey);
+            NatsUserClaims user = NatsJwt.NewUserClaims(r.UserNKey);
             user.Audience = t.cv.Audience;
             user.User.Pub.Allow = [t.cv.UserInfoSubj];
             user.User.Sub.Allow = ["_INBOX.>"];
@@ -322,7 +321,7 @@ public class Testing
                 return new NatsAuthorizerResult(string.Empty, 401, "Unauthorized");
             }
 
-            NatsUserClaims user = t.jwt.NewUserClaims(r.UserNKey);
+            NatsUserClaims user = NatsJwt.NewUserClaims(r.UserNKey);
             user.Audience = t.cv.Audience;
             user.User.Pub.Allow = [t.cv.UserInfoSubj];
             user.User.Sub.Allow = ["_INBOX.>"];

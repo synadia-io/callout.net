@@ -18,25 +18,24 @@ string issuer = "/tmp/DA/A.nk";
 
 KeyPair ckp = KeyPair.FromSeed(File.ReadAllText(calloutIssuer));
 KeyPair akp = KeyPair.FromSeed(File.ReadAllText(issuer));
-var jwt = new NatsJwt();
 
 await using var connection = new NatsConnection(new NatsOpts { AuthOpts = new NatsAuthOpts { CredsFile = creds } });
 
 ValueTask<NatsAuthorizerResult> Authorizer(NatsAuthorizationRequest r, CancellationToken cancellationToken)
 {
-    NatsUserClaims user = jwt.NewUserClaims(r.UserNKey);
+    NatsUserClaims user = NatsJwt.NewUserClaims(r.UserNKey);
 
     if (r.NatsConnectOptions.Name == "bad")
     {
         return ValueTask.FromResult(new NatsAuthorizerResult(string.Empty, 401, "user is not authorized"));
     }
 
-    return ValueTask.FromResult(new NatsAuthorizerResult(jwt.EncodeUserClaims(user, akp)));
+    return ValueTask.FromResult(new NatsAuthorizerResult(NatsJwt.EncodeUserClaims(user, akp)));
 }
 
 ValueTask<string> ResponseSigner(NatsAuthorizationResponseClaims r, CancellationToken cancellationToken)
 {
-    return ValueTask.FromResult(jwt.EncodeAuthorizationResponseClaims(r, ckp));
+    return ValueTask.FromResult(NatsJwt.EncodeAuthorizationResponseClaims(r, ckp));
 }
 
 var opts = new NatsAuthServiceOpts(Authorizer, ResponseSigner)

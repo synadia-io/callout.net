@@ -20,7 +20,6 @@ public record TestContext
     public NatsConnection connection { get; init; }
     public string name { get; init; }
     public string suitName { get; init; }
-    public NatsJwt jwt { get; init; }
     public string env { get; init; }
 
     public IClaimsEncoder Encoder
@@ -142,12 +141,12 @@ public class BasicClaimsEncoder : IClaimsEncoder
 
     public string Encode(NatsUserClaims claims)
     {
-        return _t.jwt.EncodeUserClaims(claims, _t.cv.AccountKeys["A"]);
+        return NatsJwt.EncodeUserClaims(claims, _t.cv.AccountKeys["A"]);
     }
 
     public string Encode(NatsAuthorizationResponseClaims claims)
     {
-        return _t.jwt.EncodeAuthorizationResponseClaims(claims, _t.cv.AccountKeys["A"]);
+        return NatsJwt.EncodeAuthorizationResponseClaims(claims, _t.cv.AccountKeys["A"]);
     }
 }
 
@@ -166,7 +165,7 @@ public class DelegatedClaimsEncoder : IClaimsEncoder
         var op = store.LoadOperators().First(o => o.Name == "O");
         var a = op.Accounts.First(a => a.Name == "A");
         claims.User.IssuerAccount = a.Subject.GetPublicKey();
-        return _t.jwt.EncodeUserClaims(claims, a.SigningKeys[0]);
+        return NatsJwt.EncodeUserClaims(claims, a.SigningKeys[0]);
     }
 
     public string Encode(NatsAuthorizationResponseClaims claims)
@@ -175,6 +174,6 @@ public class DelegatedClaimsEncoder : IClaimsEncoder
         var op = store.LoadOperators().First(o => o.Name == "O");
         var c = op.Accounts.First(a => a.Name == "C");
         claims.AuthorizationResponse.IssuerAccount = c.Subject.GetPublicKey();
-        return _t.jwt.EncodeAuthorizationResponseClaims(claims, c.SigningKeys[0]);
+        return NatsJwt.EncodeAuthorizationResponseClaims(claims, c.SigningKeys[0]);
     }
 }

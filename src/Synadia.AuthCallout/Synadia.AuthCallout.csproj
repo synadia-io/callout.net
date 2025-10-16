@@ -12,7 +12,7 @@
 
   <ItemGroup>
     <PackageReference Include="NATS.Client.Services" Version="2.5.12"/>
-    <PackageReference Include="NATS.Jwt" Version="1.0.0-preview.12"/>
+    <PackageReference Include="NATS.Jwt" Version="1.0.0-preview.16"/>
   </ItemGroup>
 
 </Project>

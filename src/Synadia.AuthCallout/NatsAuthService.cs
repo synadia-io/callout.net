@@ -23,7 +23,6 @@ public class NatsAuthService : INatsAuthService
     private const string SysRequestUserAuthSubj = "$SYS.REQ.USER.AUTH";
     private readonly INatsSvcContext _svc;
     private readonly NatsAuthServiceOpts _opts;
-    private readonly NatsJwt _natsJwt = new();
     private readonly ILogger<NatsAuthService> _logger;
     private readonly CancellationTokenSource _cts = new();
     private INatsSvcServer? _server;
@@ -197,7 +196,7 @@ public class NatsAuthService : INatsAuthService
             jwt = Encoding.ASCII.GetString(open);
         }
 
-        NatsAuthorizationRequestClaims arc = _natsJwt.DecodeClaims<NatsAuthorizationRequestClaims>(jwt);
+        NatsAuthorizationRequestClaims arc = NatsJwt.DecodeClaims<NatsAuthorizationRequestClaims>(jwt);
 
         if (!arc.Issuer.StartsWith("N"))
         {

@@ -7,6 +7,7 @@ using NATS.Jwt;
 using NATS.Jwt.Models;
 using NATS.Net;
 using NATS.NKeys;
+using Synadia.Orbit.Testing.NatsServerProcessManager;
 
 namespace Synadia.AuthCallout.Tests;
 
@@ -42,7 +43,7 @@ public class AuthServiceTest(ITestOutputHelper output)
                         """;
         const string confPath = $"server_{nameof(Connect_with_jwt)}.conf";
         File.WriteAllText(confPath, conf);
-        await using var server = await NatsServerProcess.StartAsync(logger: Logger, config: confPath);
+        await using var server = await NatsServerProcess.StartAsync(logger: Logger, config: confPath, withJs: false);
 
         var ukp = KeyPair.CreatePair(PrefixByte.User);
         var upk = ukp.GetPublicKey();

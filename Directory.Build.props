@@ -37,7 +37,7 @@
     <NoWarn>$(NoWarn);CS8774;CS8604</NoWarn>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(TargetFramework)' == 'net8.0' OR '$(TargetFramework)' == 'net10.0'">
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net8.0' OR '$(TargetFramework)' == 'net9.0' OR '$(TargetFramework)' == 'net10.0'">
     <IsTrimmable>true</IsTrimmable>
     <isAotCompatible>true</isAotCompatible>
   </PropertyGroup>

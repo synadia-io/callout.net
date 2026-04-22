@@ -32,16 +32,12 @@
     <None Include="$(MSBuildThisFileDirectory)Icon.png" Pack="true" PackagePath=""/>
   </ItemGroup>
 
-  <PropertyGroup Condition="'$(TargetFramework)' == 'netstandard2.0' OR '$(TargetFramework)' == 'netstandard2.1'">
-    <IsTrimmable>false</IsTrimmable>
-    <NoWarn>$(NoWarn);CS8774</NoWarn>
-  </PropertyGroup>
-
   <PropertyGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
-    <NoWarn>$(NoWarn);CS8604</NoWarn>
+    <IsTrimmable>false</IsTrimmable>
+    <NoWarn>$(NoWarn);CS8774;CS8604</NoWarn>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(TargetFramework)' == 'net8.0' OR '$(TargetFramework)' == 'net9.0'">
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net8.0' OR '$(TargetFramework)' == 'net9.0' OR '$(TargetFramework)' == 'net10.0'">
     <IsTrimmable>true</IsTrimmable>
     <isAotCompatible>true</isAotCompatible>
   </PropertyGroup>
@@ -54,7 +50,7 @@
   </ItemGroup>
 
   <!--  Dependencies for netstandard only  -->
-  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0' OR '$(TargetFramework)' == 'netstandard2.1'">
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
     <PackageReference Include="System.Text.Json" Version="8.0.5"/>
     <PackageReference Include="System.Threading.Channels" Version="8.0.0"/>
     <PackageReference Include="System.Diagnostics.DiagnosticSource" Version="8.0.1"/>
@@ -66,19 +62,9 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
     </PackageReference>
-  </ItemGroup>
-
-  <!--  Dependencies for netstandard2.0 only -->
-  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
     <PackageReference Include="System.Memory" Version="4.6.0"/>
     <PackageReference Include="System.Buffers" Version="4.6.0"/>
     <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="8.0.0"/>
     <PackageReference Include="IndexRange" Version="1.0.3"/>
   </ItemGroup>
-
-  <!--  Dependencies for net6.0 and net8.0 only -->
-  <ItemGroup Condition="'$(TargetFramework)' == 'net6.0' OR '$(TargetFramework)' == 'net8.0'">
-    <PackageReference Include="System.Text.Json" Version="8.0.5"/>
-  </ItemGroup>
-
 </Project>

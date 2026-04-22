@@ -1,0 +1,25 @@
+<Solution>
+  <Folder Name="/examples/">
+    <Project Path="examples/Example.AuthService/Example.AuthService.csproj" />
+  </Folder>
+  <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
+    <File Path=".gitignore" />
+    <File Path="Directory.Build.props" />
+    <File Path="LICENSE" />
+    <File Path="README.md" />
+  </Folder>
+  <Folder Name="/Solution Items/github-workflows/">
+    <File Path=".github/workflows/format.yml" />
+    <File Path=".github/workflows/release.yml" />
+    <File Path=".github/workflows/test.yml" />
+  </Folder>
+  <Folder Name="/src/">
+    <File Path="src/Directory.Build.props" />
+    <Project Path="src/Synadia.AuthCallout/Synadia.AuthCallout.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/compat/compat.csproj" />
+    <Project Path="tests/Synadia.AuthCallout.Tests/Synadia.AuthCallout.Tests.csproj" />
+  </Folder>
+</Solution>
